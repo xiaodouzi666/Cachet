@@ -40,7 +40,11 @@ class Engine(httpx.Client):
         return self.post("/generate", json=body).raise_for_status().json()
 
     def timed_sample(self, ids):
-        payload = {"input_ids": ids, "stream": True, "sampling_params": {"temperature": 0, "max_new_tokens": 8}}
+        result = self.generate(ids, max_new_tokens=8)
+        return {key: result[key] for key in ("prompt_tokens", "cached_tokens", "ttft_ms")}
+
+    def generate(self, ids, max_new_tokens):
+        payload = {"input_ids": ids, "stream": True, "sampling_params": {"temperature": 0, "max_new_tokens": max_new_tokens}}
         # Serialize before starting the clock. Include transport and detokenization.
         content = json.dumps(payload).encode()
         first_text_ms = None
@@ -71,4 +75,7 @@ class Engine(httpx.Client):
             "prompt_tokens": meta["prompt_tokens"],
             "cached_tokens": meta["cached_tokens"],
             "ttft_ms": round(first_text_ms, 3),
+            "total_ms": round((perf_counter() - start) * 1000, 3),
+            "output_tokens": meta["completion_tokens"],
+            "text": last_event["text"],
         }
