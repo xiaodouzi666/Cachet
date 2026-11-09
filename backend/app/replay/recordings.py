@@ -11,7 +11,10 @@ from backend.app.config import ROOT, manifest, sources
 from backend.app.gateway.prompt_builder import END, SYSTEM, Prefix, dialogue, token_hash
 
 DIRECTORY = ROOT / "backend/app/replay/traces"
-SCHEMA = 6
+SCHEMA = 7
+SCHEMA_6_FIRST_STEP = (
+    "In two sentences, explain the chosen strategy using the two quoted costs in microdollars."
+)
 HEX256 = re.compile("[0-9a-f]{64}")
 QUOTE_FIELDS = {
     "decision",
@@ -67,11 +70,26 @@ def layers(task_id):
     return list(reversed(chain))
 
 
-def signature(task_id, buy):
+def recorded_question(schema, task, step, *, quote=None, previous="", http_feedback=None):
+    require(
+        type(schema) is int and schema in (6, SCHEMA),
+        "Unsupported GPU recording format",
+    )
+    legacy_first_turn = schema == 6 and step == 0
+    instruction = SCHEMA_6_FIRST_STEP if legacy_first_turn else STEPS[step]
+    question = turn_question(
+        task, step, instruction, previous=previous, http_feedback=http_feedback
+    )
+    if legacy_first_turn and quote is not None:
+        return question + "\nQuote: " + json.dumps(quote, sort_keys=True)
+    return question
+
+
+def signature(task_id, buy, *, schema=SCHEMA):
     spec = [
-        SCHEMA,
+        schema,
         TASKS[task_id],
-        [turn_question(TASKS[task_id][1], i, step) for i, step in enumerate(STEPS)],
+        [recorded_question(schema, TASKS[task_id][1], i) for i in range(len(STEPS))],
         buy,
         SYSTEM,
         END,
@@ -94,7 +112,8 @@ def validate(record, task_id, buy, *, source_chain=None, request_quote=None):
     """All checks are offline. The digest of the complete raw trace is checked in load()."""
     require(
         type(record) is dict
-        and record.get("schema") == SCHEMA
+        and type(record.get("schema")) is int
+        and record["schema"] in (6, SCHEMA)
         and integer(record.get("output_limit"), 1),
         "Unsupported GPU recording format or output limit",
     )
@@ -103,7 +122,7 @@ def validate(record, task_id, buy, *, source_chain=None, request_quote=None):
         record.get("task_id") == task_id
         and record.get("buy") is buy
         and record.get("source") == TASKS[task_id][0]
-        and record.get("signature") == signature(task_id, buy)
+        and record.get("signature") == signature(task_id, buy, schema=record["schema"])
         and record.get("model") == manifest()["tokenizer"]["model_id"]
         and type(record.get("tenant")) is str
         and re.fullmatch("[0-9a-f]{8}", record["tenant"]),
@@ -283,11 +302,11 @@ def verify_inputs(engine, record):
     owners = {slug: slug for slug, _ in prefix.layers}
     messages = []
     for i, turn in enumerate(record["turns"]):
-        question = turn_question(
+        question = recorded_question(
+            record["schema"],
             TASKS[task_id][1],
             i,
-            STEPS[i],
-            quote_text=json.dumps(record["quote"], sort_keys=True),
+            quote=record["quote"],
             previous=messages[-1][1] if messages else "",
             http_feedback=record["turns"][i - 1].get("http_feedback") if i else None,
         )
@@ -343,7 +362,13 @@ def application_evidence(track=None):
 
 
 def available():
+    from backend.app.agents.quote_reason import recorded_reason
+
     try:
-        return all(load(task_id, buy) for task_id in TASKS for buy in (True, False))
+        return all(
+            recorded_reason(load(task_id, buy)["quote"])
+            for task_id in TASKS
+            for buy in (True, False)
+        )
     except ValueError:
         return False

@@ -47,7 +47,6 @@ def capture(engine, task_id, buy, model, *, public_salt=None):
         tenant,
         task,
         buy,
-        json.dumps(q, sort_keys=True),
         max_output=OUTPUT_LIMIT,
         check_proposal=lambda text: proposal_feedback(task_id, text),
     )

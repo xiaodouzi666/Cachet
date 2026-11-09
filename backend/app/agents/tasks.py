@@ -40,7 +40,7 @@ CONTRACTS = {
 MAX_OUTPUT_TOKENS = 640
 
 STEPS = (
-    "In two sentences, explain the chosen strategy using the two quoted costs in microdollars.",
+    "Outline the implementation steps for the requested task and name the framework component you will change.",
     "Describe the feature requirements and measurable acceptance conditions.",
     "Locate the relevant framework classes in the supplied repository context.",
     "Trace the request path through these classes.",
@@ -159,9 +159,11 @@ FRAMEWORK_NOTES = {
 }
 
 
-def turn_question(
-    task, step, instruction, *, quote_text=None, previous="", http_feedback=None
-):
+def requests_module(task, step, *, builtin_task=True):
+    return builtin_task and task in CONTRACTS and step in (5, 8, 9)
+
+
+def turn_question(task, step, instruction, *, previous="", http_feedback=None):
     contract = CONTRACTS.get(task, "")
     if not contract and step == len(STEPS) - 1:
         instruction = "Deliver the final artifact or complete explanation requested by the user's task."
@@ -176,14 +178,14 @@ def turn_question(
         "using up to 65 words for prose or a complete short module for code. Do not claim to have run tests or edited files."
     )
     if step == 0:
-        return q + ("\nQuote: " + quote_text if quote_text is not None else "")
+        return q
     q += diagnostic(previous, task)
     if http_feedback:
         q += (
             "\nIndependent sandbox HTTP check of the preceding proposal: "
             + http_feedback
         )
-    if contract and step in (5, 8, 9):
+    if requests_module(task, step):
         q += "\nFramework API reference for this application:\n" + FRAMEWORK_NOTES[task]
     if (
         task == TASKS["route-class"][1]

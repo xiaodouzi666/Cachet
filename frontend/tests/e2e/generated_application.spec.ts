@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import type { ApplicationEvidence, Task } from "../../lib/types";
+import type {
+  ApplicationEvidence,
+  DecisionExplanation,
+  Quote,
+  Task,
+} from "../../lib/types";
 
 test("renders actual archived application outcomes separately from metering", async ({
   page,
@@ -23,6 +28,9 @@ test("renders actual archived application outcomes separately from metering", as
         task_id: string;
         decision: string;
         final_turn: number;
+        recorded_at: string;
+        quote: Quote;
+        decision_explanation: DecisionExplanation & { generated_at: string };
       };
       expect(run.task_id).toBe(task.id);
       expect(run.decision).toBe(decision);
@@ -31,6 +39,40 @@ test("renders actual archived application outcomes separately from metering", as
       outcomes[task.id + "/" + decision] = check.status;
       await expect(primary).toHaveAttribute("data-task", task.id);
       await expect(primary).toHaveAttribute("data-decision", decision);
+      const strategy = primary.getByRole("region", {
+        name: "Archived strategy decision",
+      });
+      expect(run.decision_explanation.source).toBe("recorded");
+      expect(run.decision_explanation.reason.trim().length).toBeGreaterThan(0);
+      await expect(strategy.getByRole("heading")).toHaveText(
+        "Recorded model explanation",
+      );
+      await expect(primary.locator("p time")).toHaveAttribute(
+        "datetime",
+        run.recorded_at,
+      );
+      await expect(strategy).toContainText(
+        "Platform-funded · Generated separately for this quote",
+      );
+      const generatedAt = run.decision_explanation.generated_at;
+      expect(generatedAt).toMatch(/(?:Z|\+00:00)$/);
+      await expect(strategy.locator("time")).toHaveAttribute(
+        "datetime",
+        generatedAt,
+      );
+      await expect(strategy.locator(".tag")).toHaveText(run.quote.decision);
+      await expect(strategy.locator("p")).toHaveText(
+        run.decision_explanation.reason,
+      );
+      const dollars = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 6,
+      });
+      await expect(strategy.locator("strong")).toHaveText([
+        dollars.format(run.quote.buy_micros / 1000000),
+        dollars.format(run.quote.compute_micros / 1000000),
+      ]);
       const receipt = primary.getByRole("region", {
         name: "Generated application check",
       });

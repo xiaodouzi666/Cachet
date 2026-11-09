@@ -80,6 +80,11 @@ export type Quote = {
   warm_ttft_ms: number | null;
   reason?: string;
 };
+export type DecisionExplanation = {
+  reason: string;
+  source?: "live" | "recorded";
+  generated_at?: string;
+};
 export type Task = {
   id: string;
   title: string;

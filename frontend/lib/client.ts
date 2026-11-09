@@ -117,6 +117,10 @@ export function usd(micros: number | null | undefined, digits = 6) {
     maximumFractionDigits: digits,
   });
 }
+export function explanationLabel(source?: string) {
+  if (source === "live") return "Live model explanation";
+  if (source === "recorded") return "Recorded model explanation";
+}
 export function count(value: number | undefined | null) {
   return value == null ? "—" : value.toLocaleString("en-US");
 }

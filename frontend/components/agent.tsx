@@ -1,6 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, count, describe, latency, usd, useResource } from "../lib/client";
+import {
+  api,
+  count,
+  describe,
+  explanationLabel,
+  latency,
+  usd,
+  useResource,
+} from "../lib/client";
 import type {
   ApplicationEvidence,
   ContextRow,
@@ -15,7 +23,7 @@ import { ArchivedPrefix } from "./archive";
 import { GeneratedApplication } from "./application-check";
 import { Wallet } from "./wallet";
 
-type StreamItem = { event: string; text: string };
+type StreamItem = { event: string; text: string; label?: string };
 function RunFeed({
   run,
   onComplete,
@@ -86,6 +94,8 @@ function RunFeed({
               ...p,
               {
                 event: name,
+                label:
+                  name === "decision" ? explanationLabel(d.source) : undefined,
                 text:
                   (name === "quote"
                     ? `Shared ${usd(d.buy_micros)} · independent ${usd(d.compute_micros)}`
@@ -156,7 +166,10 @@ function RunFeed({
           {activity.map((item, i) => (
             <li key={i}>
               <b>{item.event}</b>
-              <span>{item.text}</span>
+              <span>
+                {item.label && <strong>{item.label} · Platform-funded · </strong>}
+                {item.text}
+              </span>
             </li>
           ))}
         </ul>

@@ -92,6 +92,8 @@ All four final generated modules passed the isolated HTTP checks. For both Starl
 
 The mode badge reflects the reachable engine. With the GPU offline, recorded mode supports the two built-in tasks and their original quote inputs (25% cold for buy and 0% for compute). Every replay turn carries its mode. Free-text tasks need live inference. Payments in either mode require the configured PayPal sandbox.
 
+The quote determines whether the agent buys shared context or computes privately. Before the first metered turn, the serving model explains the choice in a separate, unbilled request. Cachet checks both prices and the selected strategy before publishing the explanation. The archive pairs each original quote with a separately recorded explanation and preserves the original coding responses. With SGLang online, run `.venv/bin/python -m scripts.record_quote_reasons --verify-only` to reconstruct the four input token sequences. [GPU quote recordings](backend/app/replay/quote_reasons.json)
+
 ## PayPal APIs
 
 | API | Where Cachet uses it | Implementation |

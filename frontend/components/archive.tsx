@@ -1,18 +1,33 @@
 "use client";
 import { useState } from "react";
-import { count, latency, useResource } from "../lib/client";
-import type { ApplicationEvidence, Span, Task } from "../lib/types";
+import {
+  count,
+  explanationLabel,
+  latency,
+  usd,
+  useResource,
+} from "../lib/client";
+import type {
+  ApplicationEvidence,
+  DecisionExplanation,
+  Quote,
+  Span,
+  Task,
+} from "../lib/types";
 import { GeneratedApplication } from "./application-check";
 import { Failure, PrefixStack, Skeleton, Tag } from "./ui";
 
 type Strategy = "buy" | "compute";
 type ArchiveTurn = ApplicationEvidence & {
   decision?: Strategy;
+  decision_explanation?: DecisionExplanation | null;
+  quote?: Pick<Quote, "decision" | "buy_micros" | "compute_micros">;
   final_turn?: number;
   final_output_text?: string;
   earlier_verified_output_text?: string;
   task_id: string;
   model: string;
+  recorded_at?: string;
   mode: "recorded";
   turn: number;
   cached_tokens: number;
@@ -26,6 +41,18 @@ const strategyLabels = {
 };
 function referencePath(task: string, strategy: Strategy) {
   return `reference-turn?task_id=${encodeURIComponent(task)}&decision=${strategy}`;
+}
+function RecordingTime({ at }: { at: string }) {
+  return (
+    <time dateTime={at}>
+      {new Date(at).toLocaleString("en-GB", {
+        dateStyle: "medium",
+        timeStyle: "medium",
+        timeZone: "UTC",
+      })}{" "}
+      UTC
+    </time>
+  );
 }
 
 function Measurement({
@@ -54,6 +81,12 @@ function Measurement({
         {track.model} · {track.task_id}
         {track.decision && ` · ${strategyLabels[track.decision]}`} · Turn{" "}
         {track.turn}
+        {track.recorded_at && (
+          <>
+            {" "}
+            · Coding run recorded <RecordingTime at={track.recorded_at} />
+          </>
+        )}
       </p>
       <PrefixStack
         spans={track.spans}
@@ -64,6 +97,42 @@ function Measurement({
         {count(track.cached_tokens)} cached / {count(track.prompt_tokens)} input
         tokens · {latency(track.ttft_ms)} measured TTFT
       </small>
+      {track.quote && (
+        <section className="quote-box" aria-label="Archived strategy decision">
+          <div className="toolbar">
+            <h4>
+              {explanationLabel(track.decision_explanation?.source) ||
+                "Recorded quote"}
+            </h4>
+            <Tag>{track.quote.decision}</Tag>
+          </div>
+          <div className="two-col">
+            <div>
+              <small>Buy shared context</small>
+              <strong>{usd(track.quote.buy_micros)}</strong>
+            </div>
+            <div>
+              <small>Compute privately</small>
+              <strong>{usd(track.quote.compute_micros)}</strong>
+            </div>
+          </div>
+          {track.decision_explanation?.reason && (
+            <p>{track.decision_explanation.reason}</p>
+          )}
+          {track.decision_explanation?.source === "recorded" && (
+            <small>
+              Platform-funded · Generated separately for this quote
+              {track.decision_explanation.generated_at && (
+                <>
+                  {" "}
+                  ·{" "}
+                  <RecordingTime at={track.decision_explanation.generated_at} />
+                </>
+              )}
+            </small>
+          )}
+        </section>
+      )}
       <GeneratedApplication
         evidence={track}
         finalTurn={track.final_turn}

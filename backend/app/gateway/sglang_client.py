@@ -29,6 +29,14 @@ def validate_counts(meta, token_count):
         raise ValueError("SGLang cache count differs from the submitted token prefix.")
 
 
+def sampling_params(max_new_tokens, *, stop_at_module_fence=False):
+    params = {"temperature": 0, "max_new_tokens": max_new_tokens}
+    if stop_at_module_fence:
+        # Keep the model's closing delimiter for the downstream Python/HTTP checks.
+        params.update(stop=["\n```\n", "\r\n```\r\n"], no_stop_trim=True)
+    return params
+
+
 class Engine(httpx.Client):
     def __init__(self, mode="live"):
         if mode == "hosted":
@@ -60,7 +68,7 @@ class Engine(httpx.Client):
     def sample(self, ids, max_new_tokens=8):
         body = {
             "input_ids": ids,
-            "sampling_params": {"temperature": 0, "max_new_tokens": max_new_tokens},
+            "sampling_params": sampling_params(max_new_tokens),
         }
         result = self.post("/generate", json=body).raise_for_status().json()
         validate_counts(result["meta_info"], len(ids))
@@ -72,11 +80,11 @@ class Engine(httpx.Client):
             key: result[key] for key in ("prompt_tokens", "cached_tokens", "ttft_ms")
         }
 
-    def generate(self, ids, max_new_tokens, fault_ms=0):
+    def generate(self, ids, max_new_tokens, fault_ms=0, *, stop_at_module_fence=False):
         payload = {
             "input_ids": ids,
             "stream": True,
-            "sampling_params": {"temperature": 0, "max_new_tokens": max_new_tokens},
+            "sampling_params": sampling_params(max_new_tokens, stop_at_module_fence=stop_at_module_fence),
         }
         # Serialize before starting the clock. Include transport and detokenization.
         content = json.dumps(payload).encode()

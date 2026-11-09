@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.agents.inference import live_turns
+from backend.app.agents.quote_reason import generate_reason
 from backend.app.agents.tasks import TASKS
 from backend.app.api.agent import next_fault
 from backend.app.api.catalog import observed_live_call, pending_flush_id
@@ -43,11 +44,15 @@ def test_judge_flush_then_fault(engine, tmp_path, monkeypatch):
         observed_live_call(other, marker)
         assert pending_flush_id(judge) == marker
 
-        owners = {slug: slug for slug, _ in prefix.layers}
+        control("fault", {"ttft_delay_ms": 1000, "calls": 2})
         terms = quote(sum(len(ids) for _, ids in prefix.layers), 10, .25)
+        assert generate_reason(engine, terms)["source"] == "live"
+        assert pending_flush_id(judge) == marker
+
+        owners = {slug: slug for slug, _ in prefix.layers}
         stream = live_turns(
             engine, prefix, owners, secrets.token_hex(4), TASKS["rate-limit"][1], True,
-            json.dumps(terms, sort_keys=True), max_output=16,
+            max_output=16,
             fault_source=lambda: next_fault(judge),
             pending_flush=lambda: pending_flush_id(judge),
         )
@@ -67,12 +72,12 @@ def test_judge_flush_then_fault(engine, tmp_path, monkeypatch):
 
         cold, cold_price = metered_turn(1)
         assert cold["cache_flush_id"] == marker
-        assert cold["cached_tokens"] == cold["fault_injected_ms"] == cold_price.public_charge_micros == 0
+        assert cold["cached_tokens"] == cold_price.public_charge_micros == 0
+        assert cold["fault_injected_ms"] >= 1000
         assert not any(cold_price.royalty_micros.values())
         observed_live_call(judge, marker)
         assert pending_flush_id(judge) is None
 
-        control("fault", {"ttft_delay_ms": 1000, "calls": 1})
         warm, price = metered_turn(2)
         assert "cache_flush_id" not in warm and warm["fault_injected_ms"] >= 1000
         assert all(price.hits[slug] > 0 for slug in owners)

@@ -1,4 +1,4 @@
-from backend.app.agents.tasks import MAX_OUTPUT_TOKENS, STEPS, turn_question
+from backend.app.agents.tasks import MAX_OUTPUT_TOKENS, STEPS, requests_module, turn_question
 from backend.app.config import manifest
 from backend.app.gateway.prompt_builder import token_hash
 
@@ -10,7 +10,8 @@ def live_turns(
     tenant,
     task,
     buy,
-    quote_text,
+    *,
+    builtin_task=True,
     max_output=MAX_OUTPUT_TOKENS,
     fault_source=None,
     check_proposal=None,
@@ -23,7 +24,6 @@ def live_turns(
             task,
             i,
             step,
-            quote_text=quote_text,
             previous=messages[-1][1] if messages else "",
             http_feedback=http_feedback,
         )
@@ -44,6 +44,7 @@ def live_turns(
             prompt.ids,
             max_new_tokens=max_output,
             fault_ms=fault_source() if fault_source else 0,
+            stop_at_module_fence=requests_module(task, i, builtin_task=builtin_task),
         )
         if result["prompt_tokens"] != len(prompt.ids):
             raise ValueError("The engine reported an unexpected prompt length")

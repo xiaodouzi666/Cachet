@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from backend.app import ledger, marketplace
 from backend.app.agents.anomaly import payer_key, same_payer_layers
 from backend.app.agents.inference import live_turns
+from backend.app.agents.quote_reason import generate_reason, recorded_reason
 from backend.app.agents.tasks import TASKS, STEPS
 from backend.app.api.access import admin, client_ip, current_workspace, limit, owned
 from backend.app.api.catalog import chain, observed_live_call, pending_flush_id, warm_after_miss
@@ -54,6 +55,12 @@ class Start(BaseModel):
 
 def emit(db, run_id, kind, payload):
     db.add(RunEvent(run_id=run_id, event_type=kind, payload=payload))
+
+
+def public_explanation(receipt):
+    # The full token sequence and inference counters stay in the GPU evidence.
+    fields = ("source", "reason", "model", "generated_at", "input_hash", "answer_sha256")
+    return {field: receipt[field] for field in fields}
 
 
 def replay_turns(track, owners, fault_source):
@@ -265,15 +272,6 @@ def execute(ws, identifier, context_id, tenant):
                 task_id = r.task_id
                 mode = r.mode
                 emit(db, r.id, "quote", config)
-                emit(
-                    db,
-                    r.id,
-                    "decision",
-                    {
-                        "decision": r.decision,
-                        "reason": f"Shared cost {config['buy_micros']} µUSD; private baseline {config['compute_micros']} µUSD.",
-                    },
-                )
             ensure_payer_link(ws, mid)
             buy = config["decision"] == "buy"
             rates = Rates.from_settings(
@@ -300,6 +298,7 @@ def execute(ws, identifier, context_id, tenant):
                         "Hosted calibration changed after this run was quoted."
                     )
                 if engine is not None:
+                    explanation = generate_reason(engine, config)
                     prefix = Prefix(engine, ctx.slug)
                     turns = live_turns(
                         engine,
@@ -308,7 +307,7 @@ def execute(ws, identifier, context_id, tenant):
                         tenant,
                         task,
                         buy,
-                        json.dumps(config, sort_keys=True),
+                        builtin_task=task_id in TASKS,
                         fault_source=lambda: next_fault(ws),
                         pending_flush=(
                             (lambda: pending_flush_id(ws))
@@ -320,7 +319,15 @@ def execute(ws, identifier, context_id, tenant):
                     checked_track = load(
                         task_id, buy, source_chain=source_chain, request_quote=config
                     )
+                    explanation = recorded_reason(checked_track["quote"])
                     turns = replay_turns(checked_track, owners, lambda: next_fault(ws))
+                with session_scope() as db:
+                    emit(
+                        db,
+                        identifier,
+                        "decision",
+                        {"decision": config["decision"], **public_explanation(explanation)},
+                    )
                 for meter in ensure_budget_before_next(turns, ws, mid, rates):
                     if engine is not None:
                         meter["mode"] = mode
@@ -452,6 +459,7 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
                 ],
                 request_quote=q,
             )
+            recorded_reason(q)
         q["chain"] = [c.slug for c in layers]
         q["context_ids"] = [c.id for c in layers]
         r = AgentRun(
@@ -530,6 +538,8 @@ def archived_reference_turn(task_id: str = "rate-limit", decision: str = "buy"):
     return {
         "task_id": track["task_id"],
         "decision": decision,
+        "quote": track["quote"],
+        "decision_explanation": public_explanation(recorded_reason(track["quote"])),
         "final_turn": len(track["turns"]),
         "final_output_text": track["turns"][-1]["text"],
         "earlier_verified_output_text": (
