@@ -19,6 +19,7 @@ from backend.app.api.access import (
     owned,
 )
 from backend.app.api.catalog import schedule_rewarm
+from backend.app.api import seed
 from backend.app.config import value
 from backend.app.db import session_scope
 from backend.app.models import (
@@ -43,6 +44,7 @@ from backend.app.settlement.audit import audit
 from backend.app.settlement.payout_job import settle
 
 router = APIRouter(prefix="/api", dependencies=[Depends(admin)])
+router.include_router(seed.router)
 wsdep = Depends(current_workspace)
 
 
@@ -137,13 +139,16 @@ def state(ws=wsdep):
         )
         sandbox = value("PAYPAL_ENV", "sandbox") == "sandbox"
         buyer = sandbox and kind == "judge"
+        provenance = seed.seed_state(db, ws)
+        latest_run = fields(run, "id mandate_id task_id status mode quote_json") if run else None
+        if latest_run:
+            latest_run["operator_seeded"] = run.id in provenance["operator_seed_run_ids"]
         return {
+            **provenance,
             "workspace_id": ws,
             "kind": kind,
             "mandate": service.view(m) if m else None,
-            "run": fields(run, "id mandate_id task_id status mode quote_json")
-            if run
-            else None,
+            "run": latest_run,
             "sandbox_buyer_email": value("JUDGE_BUYER_EMAIL") if buyer else None,
             "sandbox_buyer_password": value("JUDGE_BUYER_PASSWORD") if buyer else None,
             "publisher_receivers": {

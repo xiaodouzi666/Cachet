@@ -9,11 +9,14 @@ from sandbox_smoke import check
 
 def seed(demo):
     for _ in range(120):
-        rows = [s for s in demo.sessions if s["purpose"] == "seed" and s.get("finished")]
+        rows = [s for s in demo.sessions if s["purpose"] == "seed" and s.get("finished") and s.get("operator_seeded")]
         run_ids = {s["run_id"] for s in rows}
         check(len(run_ids) == len(rows), "Duplicate seed run IDs in the private journal.")
         payable = demo.payable()
         if len(run_ids) >= 30 and min(payable.values()) >= 50_000:
+            state = demo.call("GET", "/judge/state")
+            check(state["operator_seeded"] and state["operator_seed_run_count"] == len(state["operator_seed_run_ids"])
+                  and run_ids <= set(state["operator_seed_run_ids"]), "Seed evidence differs from committed server lineage.")
             demo.data["seed"] = {"at":now(), "distinct_live_sessions":len(run_ids),
                                  "outstanding_micros":payable, "reconciliation":demo.reconcile()}
             demo.journal.save()

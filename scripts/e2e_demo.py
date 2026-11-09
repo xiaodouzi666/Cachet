@@ -181,6 +181,11 @@ class Demo:
             mandate = self.call("POST", f"/mandates/{mid}/authorize")
         check(mandate["authorization_id"], "A real sandbox authorization is required.")
         s["authorization_id"] = mandate["authorization_id"]
+        if purpose == "seed" and not s.get("seed_reserved"):
+            reserved = self.call("POST", f"/operator/seed-mandates/{mid}")
+            check(reserved["reserved_mandate_id"] == mid, "Seed reservation refers to a different mandate.")
+            s["seed_reserved"] = True
+            self.journal.save()
         if not s.get("run_id"):
             # A previous process may have accepted the POST and lost its response.
             last = self.call("GET", "/judge/state").get("run")
@@ -198,7 +203,7 @@ class Demo:
                     voided = self.call("POST", f"/mandates/{mid}/close")
                     check(voided["status"] == "VOIDED" and not voided["captured_micros"], "Unused authorization was not released.")
                     s.setdefault("unused_authorizations", []).append(s.pop("authorization_id"))
-                    s.pop("mandate_id"); s.pop("order_id")
+                    s.pop("mandate_id"); s.pop("order_id"); s.pop("seed_reserved", None)
                     self.journal.save()
                     raise exc
                 s.update(run_id=run["run_id"], accepted_at=time.time())
@@ -229,6 +234,11 @@ class Demo:
             affected = {rid for r in receipts if r["status"] == "COMPLETED" and r["amount_cents"] > 0 and r["paypal_refund_id"]
                         for rid in r["call_ids_json"]}
             check({r["id"] for r in faults} <= affected, "The three injected calls are not linked to completed PayPal refunds.")
+        if purpose == "seed":
+            confirmed = self.call("POST", f"/operator/seed-runs/{s['run_id']}")
+            check(confirmed["operator_seed_run_id"] == s["run_id"] and confirmed["operator_seeded"] is True,
+                  "The completed operator seed was not confirmed.")
+            s["operator_seeded"] = True
         s.update(captures=captures, refunds=receipts, closed=closed, payable_after=self.payable(), finished=now())
         self.journal.save()
         return s
