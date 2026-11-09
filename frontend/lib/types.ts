@@ -7,6 +7,7 @@ export type Health = {
 };
 export type Source = {
   slug: string;
+  license?: string;
   title?: string;
   parent: string | null;
   token_len: number;

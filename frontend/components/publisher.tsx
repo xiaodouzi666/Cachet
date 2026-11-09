@@ -136,6 +136,9 @@ export function Publisher() {
                 ))}
               </select>
             </label>
+            {source?.license && (
+              <small className="full">Source license · {source.license}</small>
+            )}
             {source && session.state?.publisher_receivers?.[source.slug] && (
               <div className="full">
                 <button

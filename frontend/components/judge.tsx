@@ -100,8 +100,8 @@ export function Judge() {
         <div className="guide-panel">
           <ShieldCheck size={28} />
           <p>
-            Your browser keeps the workspace in an HTTP-only cookie. Sandbox
-            actions are scoped to this workspace.
+            Your browser keeps the workspace in an HTTP-only cookie. The guide
+            uses PayPal sandbox payments.
           </p>
           <button
             type="button"

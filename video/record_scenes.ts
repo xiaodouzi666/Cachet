@@ -486,6 +486,9 @@ async function main() {
   await fs.mkdir(directory, { recursive: true });
   const timeline = { origin: new URL(baseURL).origin, rehearsal, scenes: {} };
   let state;
+  const scratchRoot = path.join(root, ".cache", "recordings");
+  await fs.mkdir(scratchRoot, { recursive: true, mode: 0o700 });
+  const scratch = await fs.mkdtemp(path.join(scratchRoot, "take-"));
   const browser = await chromium.launch({
     slowMo: 60,
     channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || undefined,
@@ -496,7 +499,7 @@ async function main() {
         baseURL,
         storageState: state,
         viewport: { width: 1920, height: 1080 },
-        recordVideo: { dir: directory, size: { width: 1920, height: 1080 } },
+        recordVideo: { dir: scratch, size: { width: 1920, height: 1080 } },
       });
       const useSeed = name === "S7" && process.env.CACHET_S7_SEED_JOURNAL;
       if (useSeed)
@@ -563,6 +566,7 @@ async function main() {
     }
   } finally {
     await browser.close();
+    await fs.rm(scratch, { force: true, recursive: true });
     console.log(path.relative(root, directory));
   }
 }
