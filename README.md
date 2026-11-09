@@ -73,7 +73,7 @@ The benchmark used Qwen2.5-7B-Instruct-AWQ, SGLang 0.5.23 and an NVIDIA GeForce 
 | 16,000 | 4,160 ms | 47 ms |
 | 26,000 | 8,432 ms | 69 ms |
 
-A separate ten-turn FastAPI rate-limiting task produced its first text in 97 ms using the shared prefix and 8,241 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.043542 and $0.053966 respectively. The two conversations produced their own outputs. These amounts describe metered usage. [Paired benchmark and fit](bench/results/calibration.json) · [Session comparison](bench/results/sessions.json)
+A separate ten-turn FastAPI rate-limiting task produced its first text in 192 ms using the shared prefix and 8,339 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.045957 and $0.056291 respectively. The two conversations produced their own outputs. In a network-isolated container, three of the four unchanged final modules passed their task’s HTTP checks. The private-compute Starlette example returned HTTP 500. Its failed check appears with the original response. These amounts describe metered usage. [Paired benchmark and fit](bench/results/calibration.json) · [Session comparison](bench/results/sessions.json)
 
 ## Inference and settlement components
 
