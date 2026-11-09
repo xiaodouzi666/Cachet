@@ -1,0 +1,12 @@
+# Deploying Cachet for judges
+
+The repository includes two Render Starter web services. The API owns a persistent disk mounted at `/var/data`. The web service forwards allowed paths to the API with a server-side gateway credential. Review the two service charges and persistent disk in the Render workspace before creating them. Keep the judge URL available throughout the published judging period. [Blueprint reference](https://render.com/docs/blueprint-spec) · [Official competition rules](https://paypalaihackathon.devpost.com/rules)
+
+1. Run the GPU on loopback using the authenticated SGLang startup script. Route a stable HTTPS tunnel to that loopback port. The API uses the tunnel origin plus the GPU token. Keep both server-side.
+2. Apply `render.yaml` to the repository in the team's Render workspace. Fill the sandbox app credentials, dedicated judge credentials, receivers, stable tunnel URL and GPU token. Set `PUBLIC_WEB_URL` to the web service's exact HTTPS origin; it supplies the PayPal buyer return URL. Use the service-generated admin token in the CLI operator environment.
+3. Set `PUBLIC_API_URL` in the operator's private environment. Run `.venv/bin/python scripts/register_webhooks.py` and configure the returned webhook ID on the API. Only the webhook URL and the health endpoint allow calls without a BFF credential.
+4. Run the sandbox wallet and two-recipient payout probes in the pricing guide. Select `PAYPAL_CAPTURE_POLICY=final-only` if the app cannot perform multiple partial captures. Verify an actual callback, the returned fees, the authorization release and returned balances.
+5. Check the frontend, API, judge guide and persisted workspace after an API restart. Use `scripts/smoke_prod.sh` and then the full acceptance flow against the deployed API. Set the repository's Actions variable `CACHET_PUBLIC_API_URL` to the HTTPS API origin to enable health monitoring. Provision the AG Studio production license for the frontend build.
+6. Run the seed driver with the live GPU and genuine sandbox funding before recording the final judge video. Keep workspace cookies, webhook signatures and buyer credentials out of the footage and downloadable logs. The recording mode uses `?rec=1`.
+
+The application is configured for PayPal Sandbox. A lost GPU connection selects validated recorded workloads within the health probe cache window. The dashboard reports the actual mode. Each full financial flow still uses the PayPal API. [Sandbox and e2e commands](pricing.md)

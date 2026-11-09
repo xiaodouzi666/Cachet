@@ -1,0 +1,66 @@
+services:
+  - type: web
+    name: cachet-api
+    runtime: python
+    plan: starter
+    numInstances: 1
+    buildCommand: pip install -r backend/requirements.txt && python scripts/toolkit_probe.py install
+    startCommand: python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    disk:
+      name: cachet-ledger
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.13"
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:////var/data/cachet.db
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_CAPTURE_POLICY
+        value: partial
+      - key: JUDGE_BUYER_EMAIL
+        sync: false
+      - key: JUDGE_BUYER_PASSWORD
+        sync: false
+      - key: PUBLISHER_STARLETTE_EMAIL
+        sync: false
+      - key: PUBLISHER_FASTAPI_EMAIL
+        sync: false
+      - key: PUBLIC_WEB_URL
+        sync: false
+      - key: SGLANG_BASE_URL
+        sync: false
+      - key: SGLANG_API_KEY
+        sync: false
+  - type: web
+    name: cachet-web
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --prefix frontend --include=dev && npm --prefix frontend run build
+    startCommand: npm --prefix frontend run start -- --hostname 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CACHET_API_URL
+        fromService:
+          type: web
+          name: cachet-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: ADMIN_TOKEN
+        fromService:
+          type: web
+          name: cachet-api
+          envVarKey: ADMIN_TOKEN
+      - key: NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY
+        sync: false

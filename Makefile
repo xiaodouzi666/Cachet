@@ -1,7 +1,13 @@
 PYTHON ?= .venv/bin/python
 .DEFAULT_GOAL := test
 
-.PHONY: dev test verify verify-full e2e bench hooks
+.PHONY: setup dev test verify verify-full e2e bench hooks
+setup:
+	python3.11 -m venv .venv
+	$(PYTHON) -m pip install -r backend/requirements-dev.txt
+	npm ci --prefix frontend
+	$(PYTHON) scripts/local_env.py
+
 dev:
 	scripts/dev.sh
 

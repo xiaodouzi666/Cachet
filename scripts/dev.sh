@@ -48,6 +48,6 @@ wait_for_url() {
 }
 
 start cachet-api "$python_bin" -m uvicorn backend.app.main:app --host 127.0.0.1 --port "$api_port" --reload --reload-dir backend
-start cachet-web npm --prefix frontend run dev -- --hostname 127.0.0.1 --port "$web_port"
+start cachet-web "$python_bin" scripts/frontend_env.py npm --prefix frontend run dev -- --hostname 127.0.0.1 --port "$web_port"
 wait_for_url cachet-api "http://127.0.0.1:$api_port/api/health"
 wait_for_url cachet-web "http://127.0.0.1:$web_port/"
