@@ -21,3 +21,14 @@ class Engine(httpx.Client):
         if not key:
             raise ValueError("Configure SGLANG_API_KEY for the Cachet inference service.")
         super().__init__(base_url=url, headers={"Authorization": f"Bearer {key}"}, timeout=180)
+
+    def flush(self):
+        self.post("/flush_cache", params={"timeout": 10}).raise_for_status()
+
+    def encode(self, text):
+        body = {"prompt": text, "add_special_tokens": False}
+        return self.post("/tokenize", json=body).raise_for_status().json()["tokens"]
+
+    def sample(self, ids, max_new_tokens=8):
+        body = {"input_ids": ids, "sampling_params": {"temperature": 0, "max_new_tokens": max_new_tokens}}
+        return self.post("/generate", json=body).raise_for_status().json()
