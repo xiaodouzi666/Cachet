@@ -522,6 +522,12 @@ def archived_reference_turn(task_id: str = "rate-limit", decision: str = "buy"):
         "task_id": track["task_id"],
         "decision": decision,
         "final_turn": len(track["turns"]),
+        "final_output_text": track["turns"][-1]["text"],
+        "earlier_verified_output_text": (
+            track["turns"][track["verified_application_turn"] - 1]["text"]
+            if track.get("earlier_application_check") is not None
+            else None
+        ),
         **application_evidence(track),
         "recorded_at": track["recorded_at"],
         "model": track["model"],

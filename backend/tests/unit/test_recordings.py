@@ -59,6 +59,7 @@ def test_recorded_terminal_and_public_reference_expose_only_the_selected_applica
             assert reference["decision"] == decision and reference["final_turn"] == len(
                 track["turns"]
             )
+            assert reference["final_output_text"] == track["turns"][-1]["text"]
             assert reference["application_check"] == track["application_check"]
             assert (
                 reference["verified_application_turn"]
