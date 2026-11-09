@@ -179,11 +179,10 @@ def authorize(ws, identifier):
             m = owned(db, Mandate, identifier, ws)
             if m.authorization_id:
                 return view(m)
+            if m.status not in {"CREATED", "APPROVED"}:
+                raise HTTPException(409, "This mandate is closed to new approvals")
             if not m.paypal_order_id:
                 raise HTTPException(409, "Create the sandbox order first")
-            op = prepare(
-                db, ws, "authorize", m.id, {"order": m.paypal_order_id}, "approve"
-            )
         order = pp.get_order(m.paypal_order_id)
 
         def auths(order):
@@ -194,11 +193,17 @@ def authorize(ws, identifier):
             ]
 
         items = auths(order)
+        if (
+            not items
+            and order.get("status") != "APPROVED"
+            and not (m.payment_method == "card" and order.get("status") == "CREATED")
+        ):
+            raise HTTPException(409, "PayPal buyer approval is required")
+        with session_scope() as db:
+            op = prepare(
+                db, ws, "authorize", m.id, {"order": m.paypal_order_id}, "approve"
+            )
         if not items:
-            if order.get("status") != "APPROVED" and not (
-                m.payment_method == "card" and order.get("status") == "CREATED"
-            ):
-                raise HTTPException(409, "PayPal buyer approval is required")
             response = pp.authorize_order(m.paypal_order_id, op.id)
             items = auths(response) or auths(pp.get_order(m.paypal_order_id))
         if len(items) != 1:
@@ -338,7 +343,7 @@ def close(ws, identifier):
     with lock(ws), PayPalClient.from_env() as pp:
         with session_scope() as db:
             m = owned(db, Mandate, identifier, ws)
-            if m.status in {"CLOSED", "VOIDED", "EXPIRED"}:
+            if m.status in {"CLOSED", "VOIDED", "EXPIRED", "FAILED"}:
                 return view(m)
             active = db.scalar(
                 select(AgentRun.id).where(
@@ -351,11 +356,43 @@ def close(ws, identifier):
                     409, "Wait until the agent run finishes before closing"
                 )
             if not m.authorization_id:
-                raise HTTPException(409, "A PayPal authorization is required")
+                pending = db.scalar(
+                    select(Operation.id).where(
+                        Operation.subject == m.id, Operation.kind == "authorize"
+                    )
+                )
+                if pending or not m.paypal_order_id:
+                    raise HTTPException(
+                        409, "Recover the pending PayPal operation before closing"
+                    )
             if m.status == "CAPTURING":
                 raise HTTPException(409, "A prior capture is awaiting confirmation")
-            if m.status != "CLOSING":
+            if m.authorization_id and m.status != "CLOSING":
                 transition(m, "CLOSING")
+        if not m.authorization_id:
+            order = pp.get_order(m.paypal_order_id)
+            has_payments = any(
+                unit.get("payments") for unit in order.get("purchase_units", [])
+            )
+            if (
+                order.get("id") != m.paypal_order_id
+                or has_payments
+                or order.get("status")
+                not in {
+                    "CREATED",
+                    "APPROVED",
+                    "VOIDED",
+                    "PAYER_ACTION_REQUIRED",
+                    "SAVED",
+                }
+            ):
+                raise HTTPException(
+                    409, "Read back the PayPal authorization before closing"
+                )
+            with session_scope() as db:
+                obj = owned(db, Mandate, identifier, ws)
+                transition(obj, "FAILED")
+                return view(obj)
         capture(ws, identifier, final=True)
         auth = pp.get_authorization(m.authorization_id)
         if auth["status"] in {"CREATED", "PARTIALLY_CAPTURED"}:
