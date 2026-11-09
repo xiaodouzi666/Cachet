@@ -6,7 +6,8 @@ from sqlalchemy import select
 from backend.app import ledger
 from backend.app.db import session_scope
 from backend.app.models import Capture, Mandate, PayoutBatch, PayoutItem, Publisher, Refund
-from backend.app.paypal.client import PayPalClient, PayPalError
+from backend.app.operations import Operation
+from backend.app.paypal.client import PayPalClient, PayPalError, capture_flag_matches
 from backend.app.settlement.service import cents, lock
 
 
@@ -50,6 +51,7 @@ class Report:
 
 
 def orders(pp, report, mandates, captures):
+    authorizations = {}
     for m in mandates:
         order = report.fetch(m, "order", m.paypal_order_id, pp.get_order)
         if not order:
@@ -63,11 +65,12 @@ def orders(pp, report, mandates, captures):
         report.compare(m.id, "order authorizations", [m.authorization_id] if m.authorization_id else [], linked)
         local_captures = {c.paypal_capture_id for c in captures if c.mandate_id == m.id}
         provider_captures = {c["id"] for u in units for c in u.get("payments", {}).get("captures", [])}
-        report.compare(m.id, "unrecognized order captures", [], sorted(provider_captures - local_captures))
+        report.compare(m.id, "order captures", sorted(local_captures), sorted(provider_captures))
         if not m.authorization_id and m.status in {"CREATED", "APPROVED", "FAILED"}:
             continue
         auth = report.fetch(m, "authorization", m.authorization_id, pp.get_authorization)
         if auth:
+            authorizations[m.id] = auth
             report.compare(m.id, "authorization ID", m.authorization_id, auth["id"])
             report.compare(m.id, "authorization amount", m.cap_micros, cents(auth["amount"]) * 10000)
             if m.status in {"CLOSED", "VOIDED", "EXPIRED"}:
@@ -76,9 +79,10 @@ def orders(pp, report, mandates, captures):
                     report.compare(m.id, "authorization status", m.status, auth["status"])
             if m.status == "ACTIVE" and auth["status"] not in {"CREATED", "PARTIALLY_CAPTURED"}:
                 report.compare(m.id, "authorization status", m.status, auth["status"])
+    return authorizations
 
 
-def cash(pp, report, captures, refunds):
+def cash(pp, report, captures, refunds, authorizations, operations):
     paid_back = defaultdict(int)
     for f in refunds:
         remote = report.fetch(f, "refund", f.paypal_refund_id, pp.get_refund)
@@ -101,7 +105,16 @@ def cash(pp, report, captures, refunds):
         amount = cents(remote["amount"])
         report.compare(cap.id, "capture ID", cap.paypal_capture_id, remote["id"])
         report.compare(cap.id, "capture amount", cap.amount_cents, amount)
-        report.compare(cap.id, "final capture", cap.final, remote.get("final_capture"))
+        auth = authorizations.get(cap.mandate_id, {})
+        related = remote.get("supplementary_data", {}).get("related_ids", {})
+        if related.get("authorization_id"):
+            report.compare(cap.id, "capture authorization", auth.get("id"), related["authorization_id"])
+        op = operations.get(cap.paypal_capture_id)
+        if op:
+            report.compare(cap.id, "capture request", op.id, remote.get("invoice_id"))
+            report.compare(cap.id, "final capture", cap.final, op.payload["final"])
+        if not capture_flag_matches(cap.final, remote.get("final_capture"), auth.get("status")):
+            report.compare(cap.id, "provider final capture", cap.final, remote.get("final_capture"))
         refunded = paid_back[cap.id]
         status = "REFUNDED" if amount and refunded == amount else "PARTIALLY_REFUNDED" if refunded else "COMPLETED"
         report.compare(cap.id, "capture status after known refunds", status, remote["status"])
@@ -152,11 +165,13 @@ def reconcile(ws):
             def scoped(model):
                 return list(db.scalars(select(model).where(model.workspace_id == ws)))
             mandates, captures, refunds, batches, items = map(scoped, (Mandate, Capture, Refund, PayoutBatch, PayoutItem))
+            operations = {op.external_id: op for op in db.scalars(select(Operation).where(
+                Operation.workspace_id == ws, Operation.kind == "capture", Operation.external_id.is_not(None)))}
             receivers = {p.id:p.paypal_receiver_email for p in scoped(Publisher)}
         if any((mandates, captures, refunds, batches, items)):
             with PayPalClient.from_env() as pp:
-                orders(pp, report, mandates, captures)
-                cash(pp, report, captures, refunds)
+                authorizations = orders(pp, report, mandates, captures)
+                cash(pp, report, captures, refunds, authorizations, operations)
                 payouts(pp, report, batches, items, receivers)
         with session_scope(write=False) as db:
             try:

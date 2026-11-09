@@ -107,6 +107,11 @@ def provider_error(response):
                        response.headers.get("paypal-debug-id") or data.get("debug_id"), issue, previous)
 
 
+def capture_flag_matches(requested, reported, authorization_status):
+    """Sandbox can set earlier partial captures to final once a final capture closes the authorization."""
+    return reported is requested or (requested is False and reported is True and authorization_status == "CAPTURED")
+
+
 class PayPalClient:
     def __init__(self, config):
         if config.get("PAYPAL_ENV", "sandbox") != "sandbox":

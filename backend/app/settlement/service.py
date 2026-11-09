@@ -22,7 +22,7 @@ from backend.app.models import (
 )
 from backend.app.operations import Control, Operation
 from backend.app.money import usd_to_micros
-from backend.app.paypal.client import PayPalClient, request_id
+from backend.app.paypal.client import PayPalClient, capture_flag_matches, request_id
 from backend.app.settlement.capture_policy import plan_capture
 from backend.app.settlement.mandate_fsm import transition
 
@@ -102,7 +102,7 @@ def view(m):
     } | {
         "mandate_id": m.id,
         "released_micros": m.cap_micros - m.captured_micros
-        if m.status in {"CLOSED", "VOIDED"}
+        if m.status in {"CLOSED", "VOIDED", "EXPIRED"}
         else 0,
     }
 
@@ -309,8 +309,12 @@ def capture(ws, identifier, *, final=False, force=False):
         )
         if parent and parent != m.authorization_id:
             raise ValueError("Capture is tied to a different authorization")
-        if cents(remote["amount"]) != amount:
-            raise ValueError("Capture readback amount differs")
+        if remote["id"] != remote_id or remote.get("invoice_id") != op.id or cents(remote["amount"]) != amount:
+            raise ValueError("Capture identity or amount differs from its prepared request")
+        if remote.get("final_capture") is not final:
+            disposition = pp.get_authorization(m.authorization_id)["status"]
+            if not capture_flag_matches(final, remote.get("final_capture"), disposition):
+                raise ValueError("Capture flag differs from its request and authorization disposition")
         fee = cents(remote["seller_receivable_breakdown"]["paypal_fee"])
         with session_scope() as db:
             m = owned(db, Mandate, identifier, ws)
@@ -398,6 +402,8 @@ def close(ws, identifier):
         if auth["status"] in {"CREATED", "PARTIALLY_CAPTURED"}:
             pp.void(m.authorization_id, request_id(ws, "void", m.id))
             auth = pp.get_authorization(m.authorization_id)
+        if auth["id"] != m.authorization_id or cents(auth["amount"]) * 10000 != m.cap_micros:
+            raise ValueError("Release readback differs from this mandate's authorization")
         if auth["status"] not in {"VOIDED", "CAPTURED", "EXPIRED"}:
             raise HTTPException(409, f"PayPal authorization is still {auth['status']}")
         with session_scope() as db:

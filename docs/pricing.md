@@ -39,6 +39,8 @@ On 9 November 2026, PayPal GET responses confirmed three $5.00 wallet authorizat
 
 Replaying the first $1.00 capture with its original request ID returned the same capture. PayPal completed a $0.20 refund against the $0.50 capture, and a subsequent GET reported that capture as `PARTIALLY_REFUNDED`.
 
+The capture request records whether Cachet intended that capture to be final. After the wallet's final capture, later GETs reported `final_capture=true` on all three captures, including the earlier two that initially reported `false`. The partial capture followed by a void still reported `false`. Reconciliation checks the original intent against the provider invoice ID and saved request. It accepts this observed update on an earlier partial only when the authorization GET confirms `CAPTURED`. [PayPal capture response](https://developer.paypal.com/sdk/payment/v2/definitions/capture/)
+
 The two-recipient payout batch reached `SUCCESS`. Separate item GETs confirmed a $0.10 payout with a $0.25 fee and a $0.20 payout with a $0.25 fee. Both items reported `SUCCESS`. The batch fee was $0.50.
 
 ## Measuring this sandbox app
@@ -55,8 +57,10 @@ The first journal records GET-verified authorization outcomes, partial captures,
 
 `make e2e` uses a dedicated sandbox judge workspace and live GPU. It first accumulates actual unpaid royalties across metered preparation sessions so both publishers can receive a whole cent. It then requires three acceptance sessions, each with three delayed turns, linked refunds and a separate reconciled two-recipient payout. `scripts/seed_demo.py` accumulates at least 30 other real operator test sessions and $0.05 outstanding per publisher. Both drivers reuse private state in `logs/demo-workspace.json` and respect the workspace's three-run hourly limit. Their separate evidence report omits login details and the workspace cookie.
 
+Run `.venv/bin/python scripts/mandate_check.py` to exercise thirty accruals from recorded GPU turns under one real $5.00 sandbox card authorization in a dedicated private SQLite ledger. It verifies partial captures, final capture, unused budget, clearing and one intentionally edited capture fee in a disposable copy. Repeating the command resumes the same ledger and rechecks the closed mandate.
+
 To exercise webhook redelivery on that workspace, run `.venv/bin/python scripts/register_webhooks.py --redeliver logs/demo-workspace-evidence.json --wait 180` on the receiver host. PayPal signs and sends each original event again. The verifier observes a new delivery count for the completed refund, its earlier capture and the original order approval. It checks that the closed mandate and journal count remain stable, then reconciles through PayPal GET. A missing original delivery or unconfirmed resend fails the probe.
 
-`.venv/bin/python scripts/reconcile_check.py logs/demo-workspace-evidence.json` takes a read-only SQLite backup into a private temporary directory. On the copy it reprocesses the verified events twice in reverse provider creation order, confirms that the transaction IDs and reconciliation agree, then flips a capture's final flag and requires PayPal GET to identify the edited field. The live database stays online throughout.
+`.venv/bin/python scripts/reconcile_check.py logs/demo-workspace-evidence.json` takes a read-only SQLite backup into a private temporary directory. On the copy it reprocesses the verified events twice in reverse provider creation order, confirms that the transaction IDs and reconciliation agree, then increases one local capture fee by a cent and requires both the PayPal fee comparison and clearing check to report the difference. The live database stays online throughout.
 
 The seed driver reserves each dedicated mandate via the operator API before starting a run. After closure, the server confirms the named live run, its committed turns and a linked capture. The judge state returns the confirmed run IDs and count for the current workspace. Manually created runs in that same workspace keep their own provenance.

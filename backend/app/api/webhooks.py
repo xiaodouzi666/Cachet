@@ -13,7 +13,7 @@ from backend.app import ledger
 from backend.app.db import session_scope
 from backend.app.models import Capture, Mandate, PayoutBatch, Refund, WebhookEvent, utcnow
 from backend.app.operations import Control, Operation
-from backend.app.paypal.client import PayPalClient, resource_id
+from backend.app.paypal.client import PayPalClient, resource_id, capture_flag_matches
 from backend.app.paypal.webhooks import EVENTS
 from backend.app.settlement.mandate_fsm import transition
 from backend.app.settlement.payout_job import refresh_batch
@@ -111,6 +111,15 @@ def money_event(pp, event):
         if remote.get("id") != rid or remote.get("status") not in allowed:
             return False
         amount = cents(remote["amount"])
+        if capture and not row and op:
+            final = op.payload["final"]
+            reported_final = remote.get("final_capture")
+            if reported_final is not final:
+                with session_scope(write=False) as db:
+                    mandate = db.get(Mandate, op.subject)
+                auth = pp.get_authorization(mandate.authorization_id)
+                if not capture_flag_matches(final, reported_final, auth["status"]):
+                    raise ValueError("PayPal capture final flag differs from its intent.")
         with session_scope() as db:
             row = db.scalar(select(model).where(column == rid))
             if row:
@@ -129,9 +138,7 @@ def money_event(pp, event):
                 m = db.get(Mandate, op.subject)
                 if m.status not in {"CAPTURING", "CLOSING"}:
                     return False
-                final = remote.get("final_capture")
-                if final is not op.payload["final"]:
-                    raise ValueError("PayPal capture final flag differs from its intent.")
+                final = op.payload["final"]
                 row = Capture(workspace_id=m.workspace_id, mandate_id=m.id, paypal_capture_id=rid,
                               status=remote["status"], amount_cents=amount, final=final,
                               fee_cents=cents(remote["seller_receivable_breakdown"]["paypal_fee"]))

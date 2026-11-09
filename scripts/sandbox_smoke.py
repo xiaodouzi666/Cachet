@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from backend.app.paypal.client import PayPalClient, PayPalConfigError, PayPalError, request_id, require, settings, usd
+from backend.app.paypal.client import PayPalClient, PayPalConfigError, PayPalError, capture_flag_matches, request_id, require, settings, usd
 
 
 def now():
@@ -164,11 +164,13 @@ def capture(pp, journal, label, auth_id, cents, final=False, replay=False):
     actual = pp.get_capture(capture_id)
     check(actual["amount"] == usd(cents), "GET capture amount mismatch.")
     check(actual.get("status") in ("COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"), "Capture has not completed.")
-    check(actual.get("final_capture") is final, "GET final_capture differs from the requested value.")
+    authorization = pp.get_authorization(auth_id)
+    check(capture_flag_matches(final, actual.get("final_capture"), authorization["status"]),
+          "GET final_capture differs from the request and authorization disposition.")
     breakdown = actual.get("seller_receivable_breakdown", {})
     check(breakdown.get("paypal_fee", {}).get("currency_code") == "USD", "PayPal capture fee unavailable.")
     journal.record(operation, {**reference(actual), "seller_receivable_breakdown": breakdown,
-                               "authorization": reference(pp.get_authorization(auth_id))})
+                               "authorization": reference(authorization)})
     return capture_id
 
 

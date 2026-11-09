@@ -64,13 +64,19 @@ def check(evidence):
             capture = db.get(Capture, target["captures"][0]["id"])
             if not capture or capture.workspace_id != ws or capture.paypal_capture_id not in refs:
                 raise ValueError("The acceptance capture is missing from the snapshot.")
-            capture.final = not capture.final
+            local_capture_id = capture.id
+        with sqlite3.connect(copy) as corrupt:
+            corrupt.execute("UPDATE capture SET fee_cents = fee_cents + 1 WHERE id = ?", (local_capture_id,))
         drift = reconcile(ws)
-        if drift["ok"] is not False or not any(d.get("id") == capture.id and d.get("field") == "final capture" for d in drift["differences"]):
-            raise RuntimeError("Deliberate snapshot edit was not reported.")
+        differences = drift["differences"]
+        if drift["ok"] is not False or not any(d.get("id") == local_capture_id and d.get("field") == "capture fee"
+                                              and d["local"] == d["paypal"] + 1 for d in differences):
+            raise RuntimeError("Deliberate capture-fee edit was not identified against PayPal.")
+        if not any(d.get("field") == "ledger" and "clearing" in d.get("detail", "") for d in differences):
+            raise RuntimeError("Deliberate capture-fee edit did not break clearing.")
         return {"workspace_id":ws, "provider_resources_checked":baseline["checked"],
                 "reverse_order_verified_events":len(events), "ledger_unchanged_after_replay":True,
-                "detected_snapshot_edit":{"capture_id":capture.id, "field":"final capture"}}
+                "detected_snapshot_edit":{"capture_id":local_capture_id, "field":"capture fee", "cent_delta":1}}
 
 
 if __name__ == "__main__":
