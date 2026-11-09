@@ -2,7 +2,9 @@
 
 Cachet lets coding agents buy warm open-source context. The engine counts reused tokens, the ledger attributes royalties to publishers, and PayPal Sandbox handles the money.
 
-![Measured cold and warm time to first text across five prefix lengths](bench/plots/prefix-latency.png)
+![Cachet showing cache hits for each source layer on the first turn of a recorded FastAPI task](docs/images/measured-prefix-segments.png)
+
+On this turn the engine reused 25,913 of 26,260 input tokens. The inspector attributes 11,992 hits to Starlette and 13,908 to FastAPI. The remaining 13 hits belong to the system prefix. [Recorded turn and token ranges](backend/app/replay/traces/rate-limit-buy.json)
 
 A team running coding agents may repeatedly process the same framework across unrelated sessions. A hot prefix avoids much of this prefill work. Cache lifetimes depend on the provider and cache configuration. Cachet uses observed reuse to price each turn and credit the maintainers who supplied the shared code. [Claude prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 
@@ -65,6 +67,8 @@ At the default tariff, a private input miss costs $1.00 per million tokens and a
 
 The benchmark used Qwen2.5-7B-Instruct-AWQ, SGLang 0.5.23 and an NVIDIA GeForce RTX 3090 Ti with 24 GiB of VRAM. Each prefix length has five cold/warm pairs. Time to first text includes the local HTTP transport and detokenization.
 
+![Measured cold and warm time to first text across five prefix lengths](bench/plots/prefix-latency.png)
+
 | Prefix tokens | Cold p50 | Warm p50 |
 |---:|---:|---:|
 | 2,000 | 384 ms | 28 ms |
@@ -75,21 +79,27 @@ The benchmark used Qwen2.5-7B-Instruct-AWQ, SGLang 0.5.23 and an NVIDIA GeForce 
 
 A separate ten-turn FastAPI rate-limiting task produced its first text in 186 ms using the shared prefix and 8,277 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.045621 and $0.056174 respectively, before any SLA adjustments. Two of the ten shared calls met the 138.152 ms warm SLA. Those two calls accounted for 1,390 microdollars of Starlette royalties and 682 microdollars of FastAPI royalties at the default tariff. The two conversations produced their own outputs. In a network-isolated container, three of the four unchanged final modules passed their task’s HTTP checks. The private-compute Starlette example returned HTTP 500. Its failed check appears with the original response. The shared FastAPI answer included prose around its working module. These amounts describe metered usage. [Paired benchmark and fit](bench/results/calibration.json) · [Session comparison](bench/results/sessions.json)
 
-## Inference and settlement components
+## AI components
 
-| Component | Responsibility | Implementation |
+| Component | Model or service | Role |
 |---|---|---|
-| Qwen coding agent | Uses its previous outputs to investigate a real framework task over ten turns | [Agent](backend/app/agents/inference.py) |
-| SGLang | Streams text and reports exact cached tokens against tenant-scoped prefixes | [Gateway](backend/app/gateway/sglang_client.py) |
-| Replay | Checks hashes, source revisions and the original quote for one of four recorded conversations | [Recorder](scripts/record_sessions.py) |
-| Ops Copilot | Uses workspace-scoped tools for payment and royalty questions. A human confirms refund proposals | [Copilot](backend/app/agents/copilot.py) |
-| AG Studio | Shows real workspace journals, a custom royalty tree, theme and Copilot agent | [Dashboard](frontend/studio/settlement.tsx) |
+| Coding agent | Qwen2.5-7B-Instruct-AWQ | Uses its previous outputs to investigate a framework task over ten turns. [Agent](backend/app/agents/inference.py) |
+| Inference gateway | SGLang | Streams text and reports cached input tokens for tenant-scoped prefixes. [Gateway](backend/app/gateway/sglang_client.py) |
+| Recorded inference | Archived Qwen conversations | Checks hashes, source revisions and the original quote before replaying a conversation. [Recorder](scripts/record_sessions.py) |
+| Ops Copilot | Local model or configured OpenAI-compatible endpoint | Uses workspace-scoped tools to answer payment and royalty questions. A human confirms refund proposals. [Copilot](backend/app/agents/copilot.py) |
+
+The mode badge reflects the reachable engine. With the GPU offline, recorded mode supports the two built-in tasks and their original quote inputs (25% cold for buy and 0% for compute). Every replay turn carries its mode. Free-text tasks need live inference. Payments in either mode require the configured PayPal sandbox.
+
+## PayPal APIs
+
+| API | Where Cachet uses it | Implementation |
+|---|---|---|
 | PayPal JS SDK and Orders v2 | Browser approval and an AUTHORIZE order for the budget | [Wallet](frontend/components/wallet.tsx) · [PayPal client](backend/app/paypal/client.py) |
 | Payments v2 | Capture authorized spend, release the unused budget and refund eligible captures | [Settlement service](backend/app/settlement/service.py) |
 | Payouts v1 | Group recipient items into a durable payout batch and read back fees and statuses | [Payout job](backend/app/settlement/payout_job.py) |
 | Webhooks and Reporting | Verify signatures, process events and inspect transaction history with the PayPal Agent Toolkit | [Webhook handler](backend/app/api/webhooks.py) · [Toolkit](backend/app/paypal/toolkit.py) |
 
-The mode badge reflects the reachable engine. With the GPU offline, recorded mode supports the two built-in tasks and their original quote inputs (25% cold for buy and 0% for compute). Every replay turn carries its mode. Free-text tasks need live inference. Payments in either mode require the configured PayPal sandbox.
+The AG Studio settlement dashboard shows the current workspace's journal, royalty tree and Ops Copilot. [Dashboard](frontend/studio/settlement.tsx)
 
 ## Verification
 
@@ -104,7 +114,12 @@ make e2e
 
 ## Prior work and scope
 
-The paper *Can I Buy Your KV Cache?* shows why provider-side prefix reuse can be economical and identifies cross-party payment as an open problem. Cachet meters contributions within a running inference engine and connects that usage to a spending authorization and publisher payables. Dependency funding platforms such as thanks.dev address a related maintainer-funding problem. [Paper](https://arxiv.org/abs/2606.13361) · [thanks.dev](https://thanks.dev/)
+| Project or study | What it measures or allocates | What the result is used for |
+|---|---|---|
+| thanks.dev | Dependencies declared in a sponsor’s repositories | Divides a donation among the upstream projects the sponsor uses. [Canonical’s funding example](https://canonical.com/blog/canonical-thanks-dev-giving-back-to-open-source-developers) |
+| Langfuse | Per-call token usage, including provider-reported cached tokens, with a price for each usage type | Reports application spend by model, user or tag. [Usage and cost tracking](https://langfuse.com/docs/observability/features/token-and-cost-tracking) |
+| *Can I Buy Your KV Cache?* | The compute cost of reusing a document’s KV cache versus rebuilding it | Proposes provider-hosted reuse and identifies payment between publishers and consumers as an open problem. [Zhang, 2026](https://arxiv.org/abs/2606.13361) |
+| Cachet | The intersection of an engine-reported cache hit with each publisher’s token range on a specific turn | Calculates each publisher’s royalty and records it in the ledger. The settlement implementation batches funded royalties for PayPal Sandbox payout. [Attribution and settlement](docs/pricing.md) |
 
 The checked-in evidence covers the GPU benchmark, forty recorded turns, local ledger checks and browser integration. Sandbox receipt totals, payout throughput and publicly hosted uptime require a provisioned deployment. Fees come from actual provider responses. The Render configuration uses a single API process and a persistent SQLite disk. [Deployment](docs/deployment.md)
 
