@@ -25,7 +25,21 @@ A shared hit breaches its SLA when its delivered time to first token exceeds the
 
 Publisher payables accrue across sessions within a workspace. Settlement pays whole cents after an individual publisher reaches $1.00, or $0.01 in judge mode. Every sandbox payout uses a stable sender batch ID and distinct sender item IDs. PayPal reports each item's transaction status independently. A successful batch alone does not establish delivery to both recipients. [PayPal Payouts integration](https://developer.paypal.com/api/payouts/customize)
 
-Cachet reads each capture's fee from the confirmed seller receivable breakdown and each successful payout item's fee from its GET response. These values feed the PayPal clearing account. No flat-fee estimate is used. The project has no published account-specific fee measurement until the configured sandbox app completes the wallet and payout probes. [PayPal capture breakdown](https://developer.paypal.com/sdk/payment/v2/definitions/capture/)
+Cachet reads each capture's fee from the confirmed seller receivable breakdown and each successful payout item's fee from its GET response. These values feed the PayPal clearing account. No flat-fee estimate is used. [PayPal capture breakdown](https://developer.paypal.com/sdk/payment/v2/definitions/capture/)
+
+## Sandbox measurements for this account
+
+On 9 November 2026, PayPal GET responses confirmed three $5.00 wallet authorizations for the configured US sandbox merchant. All amounts below are USD. Each fee is the amount PayPal reported for this account and transaction.
+
+| Wallet path | Completed captures | Fee per capture, in order | Final authorization status |
+|---|---|---|---|
+| Two partial captures, then a final capture | $1.00, $0.50, $0.30 | $0.52, $0.50, $0.30 | `CAPTURED` after the final $0.30. The remaining $3.20 was uncaptured and no explicit void was needed. |
+| One partial capture, then void | $0.10 | $0.10 | `VOIDED` with $4.90 uncaptured. |
+| Void before capture | None | — | `VOIDED` with the full $5.00 uncaptured. |
+
+Replaying the first $1.00 capture with its original request ID returned the same capture. PayPal completed a $0.20 refund against the $0.50 capture, and a subsequent GET reported that capture as `PARTIALLY_REFUNDED`.
+
+The two-recipient payout batch reached `SUCCESS`. Separate item GETs confirmed a $0.10 payout with a $0.25 fee and a $0.20 payout with a $0.25 fee. Both items reported `SUCCESS`. The batch fee was $0.50.
 
 ## Measuring this sandbox app
 
