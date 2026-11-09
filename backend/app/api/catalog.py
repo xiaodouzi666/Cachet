@@ -1,7 +1,11 @@
-from threading import Event, Lock, Thread
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from email.utils import parseaddr
+from threading import Event, Lock, Thread
+from uuid import uuid4
+
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -242,38 +246,76 @@ def quote_context(body: QuoteInput, ws=Depends(viewer)):
         )
 
 
+@dataclass
+class PendingFlush:
+    workspace: str
+    identifier: str = field(default_factory=lambda: uuid4().hex)
+    observed: Event = field(default_factory=Event)
+
+
 _rewarm_lock = Lock()
-_after_flush = None
+_after_flush: PendingFlush | None = None
 
 
-def observed_live_call():
+def pending_flush_id(ws):
+    """Mark a live shared turn at admission, before its first GPU request."""
     with _rewarm_lock:
-        if _after_flush is not None:
-            _after_flush.set()
+        pending = _after_flush
+        if pending and pending.workspace == ws and not pending.observed.is_set():
+            return pending.identifier
+    return None
 
 
-def schedule_rewarm():
-    """Keep the next real call cold, then restore published prefixes even if nobody runs."""
+def warm_after_miss(identifier, workspace, mode):
+    if mode == "live":
+        with _rewarm_lock:
+            if _after_flush is not None:
+                return  # The flush worker restores all registered sources after observation.
+    warm(identifier, workspace, mode)
+
+
+def observed_live_call(ws, flush_id):
+    with _rewarm_lock:
+        pending = _after_flush
+        if pending and pending.workspace == ws and pending.identifier == flush_id:
+            pending.observed.set()
+
+
+def flush_and_schedule_rewarm(ws):
+    """Restore after the judge's next admitted shared call or the idle timeout."""
     global _after_flush
-    observation = Event()
+    pending = PendingFlush(ws)
     with _rewarm_lock:
-        _after_flush = observation
-    with session_scope() as db:
-        contexts = list(db.scalars(select(Context)))
-        refs = [(c.id, c.workspace_id) for c in contexts]
-        for context in contexts:
-            context.status = "cold"
-            context.last_probe_hit_ratio = None
+        try:
+            with Engine() as engine:
+                engine.flush(timeout_s=60)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400:
+                raise HTTPException(409, "The GPU could not flush while requests were active.") from exc
+            raise HTTPException(502, "The GPU rejected the cache flush.") from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(503, "The live GPU could not confirm a cache flush.") from exc
+        with session_scope() as db:
+            contexts = list(db.scalars(select(Context)))
+            refs = [(c.id, c.workspace_id) for c in contexts]
+            for context in contexts:
+                context.status = "cold"
+                context.last_probe_hit_ratio = None
+        _after_flush = pending
 
     def restore():
         global _after_flush
-        observation.wait(timeout=120)
+        pending.observed.wait(timeout=120)
+        with _rewarm_lock:
+            if _after_flush is not pending:
+                return
+            _after_flush = None
         for identifier, workspace in refs:
             warm(identifier, workspace)
-        with _rewarm_lock:
-            if _after_flush is observation:
-                _after_flush = None
 
-    if refs:
-        Thread(target=restore, daemon=True, name="restore-prefix-cache").start()
-    return len(refs)
+    Thread(target=restore, daemon=True, name="restore-prefix-cache").start()
+    return {
+        "test_operation": "Global cache flush (test)",
+        "flush_id": pending.identifier,
+        "rewarming": len(refs),
+    }

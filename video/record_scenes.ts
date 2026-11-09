@@ -141,6 +141,7 @@ async function control(page, label, resultTitle) {
       r.request().method() !== "OPTIONS" &&
       r.url().includes("/api/") &&
       r.url().includes(resultTitle),
+    { timeout: 90000 },
   );
   await page.getByRole("button", { name: label, exact: true }).click();
   const response = await responseWait;
@@ -162,12 +163,135 @@ async function completedTurns(page, mark = quietMark) {
     .toBe("completed");
   await mark("ten-metered-turns");
 }
-async function auditAndClose(page, mark = quietMark) {
-  const original = (await readState(page)).mandate;
+// The SSE endpoint replays the run's persisted events before streaming new ones.
+// Return the first admission tagged by this flush, or all turns after completion.
+async function readRunTurns(page, runId, flushId = null) {
+  return page.evaluate(
+    ({ runId, flushId }) =>
+      new Promise((resolve, reject) => {
+        const source = new EventSource(
+          "/api/agent/runs/" + encodeURIComponent(runId) + "/events",
+        );
+        const turns = new Map();
+        const timer = setTimeout(
+          () => finish("Timed out waiting for live run evidence."),
+          180000,
+        );
+        function finish(error) {
+          clearTimeout(timer);
+          source.close();
+          if (error) reject(new Error(error));
+          else resolve([...turns.values()]);
+        }
+        source.addEventListener("turn", (event) => {
+          const turn = JSON.parse(event.data);
+          if (flushId && turn.cache_flush_id !== flushId) return;
+          turns.set(turn.id, turn);
+          if (flushId) finish();
+        });
+        source.addEventListener("done", () =>
+          finish(
+            flushId && "Run finished without a turn admitted after this flush.",
+          ),
+        );
+        source.addEventListener("error", (event) => {
+          if ("data" in event || source.readyState === EventSource.CLOSED)
+            finish(
+              "The run failed or its event stream closed before completion.",
+            );
+        });
+      }),
+    { runId, flushId },
+  );
+}
+
+function checkSceneRun(state, scene, status) {
+  if (
+    !scene ||
+    state.workspace_id !== scene.workspaceId ||
+    state.mandate?.id !== scene.mandateId ||
+    state.run?.mandate_id !== scene.mandateId ||
+    state.run?.id !== scene.runId ||
+    state.run.mode !== "live" ||
+    state.run.status !== status
+  )
+    throw Error(`S6 requires the same ${status} live S5 run and mandate.`);
+}
+function isColdAndFree(turn, flushId) {
+  if (!flushId || turn.cache_flush_id !== flushId) return false;
+  const publishers =
+    turn.spans_json?.filter((s) => s.kind === "publisher") || [];
+  return (
+    turn.mode === "live" &&
+    turn.cached_tokens === 0 &&
+    turn.public_charge_micros === 0 &&
+    publishers.length > 0 &&
+    publishers.every((s) => s.hits === 0 && s.royalty_micros === 0)
+  );
+}
+function isFaultedWarmBreach(turn, mode) {
+  return (
+    turn.mode === mode &&
+    turn.fault_injected_ms > 0 &&
+    turn.sla_breach === true &&
+    turn.public_charge_micros > 0 &&
+    turn.spans_json.some((s) => s.kind === "publisher" && s.hits > 0)
+  );
+}
+function matchesRefund(refund, captures, audit, breaches) {
+  const capture = captures.find((r) => r.id === refund.capture_id);
+  if (
+    !capture ||
+    !refund.paypal_refund_id ||
+    refund.status !== "COMPLETED" ||
+    !(refund.amount_cents > 0)
+  )
+    return false;
+  return (
+    refund.reason === "sla" &&
+    audit.refunds.some((r) => r.paypal_refund_id === refund.paypal_refund_id) &&
+    breaches.some(
+      (t) =>
+        capture.call_ids_json.includes(t.id) &&
+        refund.call_ids_json.includes(t.id),
+    )
+  );
+}
+function meteredRow(page, turn) {
+  return page.locator(".table-scroller tbody tr").filter({
+    has: page.locator("td:first-child", {
+      hasText: new RegExp(`^${turn}(?!\\d)`),
+    }),
+  });
+}
+async function auditAndClose(page, mark = quietMark, scene = null) {
+  const state = await readState(page);
+  if (scene) checkSceneRun(state, scene, "completed");
+  const original = state.mandate;
+  const run = state.run;
+  if (
+    !original ||
+    run?.mandate_id !== original.id ||
+    run.status !== "completed" ||
+    !["live", "hosted", "replay"].includes(run.mode)
+  )
+    throw Error("Audit requires this mandate's completed metered run.");
+  const breaches =
+    scene?.breaches ||
+    (await readRunTurns(page, run.id)).filter((turn) =>
+      isFaultedWarmBreach(turn, run.mode),
+    );
+  expect(
+    breaches.length,
+    "Audit requires a measured faulted warm SLA breach in this run",
+  ).toBeGreaterThan(0);
   await control(page, "Capture now (test)", "/judge/capture-now");
   const captured = async () =>
     (await readJson(page, "captures")).filter(
-      (r) => r.mandate_id === original.id && r.paypal_capture_id,
+      (r) =>
+        r.mandate_id === original.id &&
+        r.paypal_capture_id &&
+        breaches.some((t) => r.call_ids_json.includes(t.id)),
     );
   let captures = await captured();
   if (!captures.length) {
@@ -179,23 +303,39 @@ async function auditAndClose(page, mark = quietMark) {
   const audit = await control(page, "Audit SLA (test)", "/judge/audit");
   expect(audit.calls_reviewed).toBeGreaterThan(0);
   const refunds = await readJson(page, "refunds");
-  const ids = new Set(captures.map((r) => r.id));
+  const receipt = refunds.find((r) =>
+    matchesRefund(r, captures, audit, breaches),
+  );
   expect(
-    refunds.some(
-      (r) =>
-        ids.has(r.capture_id) &&
-        r.paypal_refund_id &&
-        r.status === "COMPLETED" &&
-        r.amount_cents > 0,
-    ),
-  ).toBe(true);
+    receipt,
+    "Expected a completed PayPal refund for the captured SLA breach",
+  ).toBeTruthy();
+  await expect(page.getByTestId("judge-result")).toContainText(
+    receipt.paypal_refund_id,
+  );
+  if (scene) await page.getByTestId("judge-result").scrollIntoViewIfNeeded();
   await mark("refund-readback");
   if (!["CLOSED", "VOIDED"].includes((await readState(page)).mandate.status))
     await control(page, "Close mandate", "/close");
   const mandate = (await readState(page)).mandate;
+  expect(mandate.id).toBe(original.id);
   expect(["CLOSED", "VOIDED"]).toContain(mandate.status);
   expect(mandate.released_micros).toBeGreaterThan(0);
+  if (scene) {
+    await page.goto("/agent?rec=1");
+    const released = page
+      .locator(".money-strip > div")
+      .filter({ hasText: "Released" });
+    await expect(released.locator(".money-val")).toHaveText(
+      (mandate.released_micros / 1000000).toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+      }),
+    );
+    await released.scrollIntoViewIfNeeded();
+  }
   await mark("unused-budget-released");
+  return { receipt, released_micros: mandate.released_micros };
 }
 
 async function eligiblePublishers(page) {
@@ -391,33 +531,103 @@ const scenes = {
   async S5({ page, go, mark }) {
     await go("/agent");
     await quote(page);
+    const state = await readState(page);
+    if (
+      state.kind !== "judge" ||
+      state.mandate?.status !== "ACTIVE" ||
+      state.run ||
+      (await readJson(page, "health")).mode !== "live"
+    )
+      throw Error(
+        "Start S5 with the fresh judge workspace, approved mandate and live GPU.",
+      );
+    const started = page.waitForResponse(
+      (r) =>
+        r.request().method() === "POST" &&
+        new URL(r.url()).pathname === "/api/agent/runs",
+    );
     await page.getByRole("button", { name: "Run agent", exact: true }).click();
+    const response = await started;
+    if (!response.ok())
+      throw Error(`Starting the S5 run failed with HTTP ${response.status()}.`);
+    const { run_id: runId } = await response.json();
+    expect(runId).toBeTruthy();
     await expect(page.locator(".events")).toContainText("decision");
     await expect(page.locator(".table-scroller tbody tr").first()).toBeVisible({
       timeout: 90000,
     });
     await mark("first-metered-turn");
-    // Continue the same live run in S6 while the remaining turns are still executing.
+    return {
+      workspaceId: state.workspace_id,
+      mandateId: state.mandate.id,
+      runId,
+    };
   },
-  async S6({ page, go, mark }) {
+  async S6({ page, go, mark, s5 }) {
     await go("/judge");
+    checkSceneRun(await readState(page), s5, "running");
     await page.getByRole("button", { name: /Exercise the controls/ }).click();
     await page
       .getByRole("checkbox", { name: /Clear the shared cache/ })
       .check();
-    await control(page, "Clear cache (test)", "/judge/flush-cache");
+    const { flush_id: flushId } = await control(
+      page,
+      "Clear cache (test)",
+      "/judge/flush-cache",
+    );
+    expect(
+      flushId,
+      "The GPU flush must return its admission marker",
+    ).toBeTruthy();
     await mark("test-cache-flush");
+    const [cold] = await readRunTurns(page, s5.runId, flushId);
+    expect(
+      isColdAndFree(cold, flushId),
+      "First live turn admitted after this flush must have zero public charge and publisher hits/royalties",
+    ).toBe(true);
+    await page.getByRole("button", { name: /Run a coding task/ }).click();
+    await expect(meteredRow(page, cold.turn)).toContainText(
+      "Cold · free public prefix",
+    );
+    await meteredRow(page, cold.turn).scrollIntoViewIfNeeded();
+    await mark("cold-free-public-prefix");
+    await page.getByRole("button", { name: /Exercise the controls/ }).click();
+    if (cold.turn >= 10)
+      throw Error("No subsequent turn remains for the fault demonstration.");
+    checkSceneRun(await readState(page), s5, "running");
     await inject(page);
     await mark("test-fault-installed");
-    await go("/agent");
-    await expect(
-      page.getByText("Cold · free public prefix").first(),
-    ).toBeVisible({ timeout: 120000 });
+    await page.getByRole("button", { name: /Run a coding task/ }).click();
     await completedTurns(page, mark);
-    await expect(page.locator("tbody")).toContainText("Fault injection (test)");
-    await go("/judge");
+    const turns = await readRunTurns(page, s5.runId);
+    const breaches = turns.filter(
+      (t) => t.turn > cold.turn && isFaultedWarmBreach(t, "live"),
+    );
+    expect(
+      breaches.length,
+      "Expected a later live, delayed publisher hit with a measured SLA breach",
+    ).toBeGreaterThan(0);
+    const row = meteredRow(page, breaches[0].turn);
+    await expect(row).toContainText("Fault injection (test)");
+    await expect(row).toContainText("SLA breach");
+    await row.scrollIntoViewIfNeeded();
+    await mark("faulted-warm-sla-breach");
     await page.getByRole("button", { name: /Exercise the controls/ }).click();
-    await auditAndClose(page, mark);
+    const { receipt, released_micros } = await auditAndClose(page, mark, {
+      ...s5,
+      breaches,
+    });
+    return {
+      ...s5,
+      flushId,
+      coldCallId: cold.id,
+      coldTurn: cold.turn,
+      refundedTurns: breaches
+        .filter((t) => receipt.call_ids_json.includes(t.id))
+        .map((t) => ({ callId: t.id, turn: t.turn })),
+      paypalRefundId: receipt.paypal_refund_id,
+      releasedMicros: released_micros,
+    };
   },
   async S7({ page, go, mark }) {
     await go("/judge");
@@ -502,7 +712,7 @@ async function main() {
   );
   await fs.mkdir(directory, { recursive: true });
   const timeline = { origin: new URL(baseURL).origin, rehearsal, scenes: {} };
-  let state;
+  let state, pendingS5Video;
   const scratchRoot = path.join(root, ".cache", "recordings");
   await fs.mkdir(scratchRoot, { recursive: true, mode: 0o700 });
   const scratch = await fs.mkdtemp(path.join(scratchRoot, "take-"));
@@ -511,7 +721,7 @@ async function main() {
     channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || undefined,
   });
   try {
-    for (const name of names) {
+    for (const [index, name] of names.entries()) {
       const context = await browser.newContext({
         baseURL,
         storageState: state,
@@ -544,7 +754,15 @@ async function main() {
             ms: Math.round(performance.now() - start),
           });
         };
-        await scenes[name]({ page, go, mark, baseURL, archiveGallery });
+        const evidence = await scenes[name]({
+          page,
+          go,
+          mark,
+          baseURL,
+          archiveGallery,
+          s5: timeline.scenes.S5?.evidence,
+        });
+        if (evidence) entry.evidence = evidence;
         if (!useSeed) {
           const capture = await context.storageState();
           const domain = new URL(baseURL).hostname;
@@ -562,18 +780,25 @@ async function main() {
         entry.status = "incomplete";
         throw e;
       } finally {
-        const video = page.video();
-        await context.close();
-        if (video) {
-          await video.saveAs(
-            path.join(
-              directory,
-              name +
-                (entry.status === "captured" ? "" : "-incomplete") +
-                ".webm",
-            ),
-          );
-          await video.delete();
+        const saveVideo = async () => {
+          const video = page.video();
+          await context.close();
+          if (video) {
+            const suffix = entry.status === "captured" ? "" : "-incomplete";
+            await video.saveAs(path.join(directory, name + suffix + ".webm"));
+            await video.delete();
+          }
+        };
+        // Stop S5's camera immediately. Its WebM can finish encoding while
+        // S6 opens the controls on the same running ten-turn workload.
+        if (
+          name === "S5" &&
+          entry.status === "captured" &&
+          names[index + 1] === "S6"
+        ) {
+          pendingS5Video = Promise.allSettled([saveVideo()]);
+        } else {
+          await saveVideo();
         }
         await fs.writeFile(
           path.join(directory, "timeline.json"),
@@ -582,9 +807,11 @@ async function main() {
       }
     }
   } finally {
+    const [s5Save] = await (pendingS5Video || []);
     await browser.close();
     await fs.rm(scratch, { force: true, recursive: true });
     console.log(path.relative(root, directory));
+    if (s5Save?.status === "rejected") throw s5Save.reason;
   }
 }
 module.exports = {
@@ -596,6 +823,8 @@ module.exports = {
   completedTurns,
   auditAndClose,
   settleAndReconcile,
+  isColdAndFree,
+  isFaultedWarmBreach,
 };
 if (require.main === module)
   main().catch((e) => {

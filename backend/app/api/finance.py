@@ -19,7 +19,7 @@ from backend.app.api.access import (
     limit,
     owned,
 )
-from backend.app.api.catalog import schedule_rewarm
+from backend.app.api.catalog import flush_and_schedule_rewarm
 from backend.app.api import seed
 from backend.app.config import value
 from backend.app.db import session_scope
@@ -39,7 +39,6 @@ from backend.app.models import (
 from backend.app.operations import Control, RunEvent
 from backend.app.money import usd_to_micros
 from backend.app.gateway.modes import health
-from backend.app.gateway.sglang_client import Engine
 from backend.app.paypal.reconciliation import reconcile
 from backend.app.settlement import service
 from backend.app.settlement.audit import audit
@@ -291,10 +290,7 @@ def flush(ws=wsdep):
     with session_scope() as db:
         throttle(db, ws, "flush")
         limit(db, ["global-cache-flush"], 1, 600)
-    with Engine() as engine:
-        engine.flush()
-    count = schedule_rewarm()
-    return {"test_operation": "Global cache flush (test)", "rewarming": count}
+    return flush_and_schedule_rewarm(ws)
 
 
 @router.post("/judge/capture-now")

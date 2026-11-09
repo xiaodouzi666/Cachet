@@ -14,6 +14,7 @@ def live_turns(
     max_output=MAX_OUTPUT_TOKENS,
     fault_source=None,
     check_proposal=None,
+    pending_flush=None,
 ):
     messages = []
     http_feedback = None
@@ -38,6 +39,7 @@ def live_turns(
             "spans": prompt.spans,
             "turn": i + 1,
         }
+        flush_id = pending_flush() if pending_flush else None
         result = engine.generate(
             prompt.ids,
             max_new_tokens=max_output,
@@ -51,6 +53,8 @@ def live_turns(
             input_hash=token_hash(prompt.ids),
             mode="live",
         )
+        if flush_id is not None:
+            result["cache_flush_id"] = flush_id
         if check_proposal and i in (5, 8):
             http_feedback = check_proposal(result["text"])
             result["http_feedback"] = http_feedback

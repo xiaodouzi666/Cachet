@@ -46,8 +46,8 @@ class Engine(httpx.Client):
             base_url=url, headers={"Authorization": f"Bearer {key}"}, timeout=180
         )
 
-    def flush(self):
-        self.post("/flush_cache", params={"timeout": 10}).raise_for_status()
+    def flush(self, *, timeout_s=10):
+        self.post("/flush_cache", params={"timeout": timeout_s}).raise_for_status()
 
     def encode(self, text):
         body = {"prompt": text, "add_special_tokens": False}

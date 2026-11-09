@@ -13,7 +13,7 @@ from backend.app.agents.anomaly import payer_key, same_payer_layers
 from backend.app.agents.inference import live_turns
 from backend.app.agents.tasks import TASKS, STEPS
 from backend.app.api.access import admin, client_ip, current_workspace, limit, owned
-from backend.app.api.catalog import chain, warm, observed_live_call
+from backend.app.api.catalog import chain, observed_live_call, pending_flush_id, warm_after_miss
 from backend.app.config import band_for, calibration, value
 from backend.app.db import session_scope
 from backend.app.gateway.billing import Span, Rates, price_call, sla_breached
@@ -231,12 +231,15 @@ def persist(ws, run_id, mid, owners, meter, profile, rates):
                 "ttft_ms",
                 "total_ms",
                 "charge_micros",
+                "public_charge_micros",
                 "royalty_json",
                 "sla_breach",
                 "fault_injected_ms",
                 "mode",
             )
         }
+        if meter.get("cache_flush_id"):
+            payload["cache_flush_id"] = meter["cache_flush_id"]
         payload["measured_ttft_ms"] = meter["engine_ttft_ms"]
         emit(db, run_id, "turn", payload)
     return c
@@ -307,6 +310,11 @@ def execute(ws, identifier, context_id, tenant):
                         buy,
                         json.dumps(config, sort_keys=True),
                         fault_source=lambda: next_fault(ws),
+                        pending_flush=(
+                            (lambda: pending_flush_id(ws))
+                            if mode == "live" and buy
+                            else None
+                        ),
                     )
                 else:
                     checked_track = load(
@@ -316,8 +324,8 @@ def execute(ws, identifier, context_id, tenant):
                 for meter in ensure_budget_before_next(turns, ws, mid, rates):
                     if engine is not None:
                         meter["mode"] = mode
-                    if mode == "live":
-                        observed_live_call()
+                    if mode == "live" and meter.get("cache_flush_id"):
+                        observed_live_call(ws, meter["cache_flush_id"])
                     with lock(ws):
                         c = persist(
                             ws,
@@ -335,10 +343,11 @@ def execute(ws, identifier, context_id, tenant):
                     if (
                         engine
                         and buy
+                        and not meter.get("cache_flush_id")
                         and c.cached_tokens
                         < sum(len(ids) for _, ids in prefix.layers) * 0.95
                     ):
-                        warm(ctx.id, ctx.workspace_id, mode)
+                        warm_after_miss(ctx.id, ctx.workspace_id, mode)
             finally:
                 if engine is not None:
                     engine.close()

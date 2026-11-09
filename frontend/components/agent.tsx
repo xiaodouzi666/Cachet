@@ -203,9 +203,7 @@ function RunFeed({
                     <td>
                       {t.turn}
                       {t.spans_json?.some((s) => s.kind === "publisher") &&
-                        t.spans_json
-                          .filter((s) => s.kind === "publisher")
-                          .every((s) => t.cached_tokens <= s.start) && (
+                        t.cached_tokens === 0 && (
                           <Tag>Cold · free public prefix</Tag>
                         )}
                       {t.sla_breach && <Tag tone="warn">SLA breach</Tag>}
