@@ -394,11 +394,13 @@ class RateLimit(RuntimeError):
 def execute(args, action):
     os.umask(0o077)
     config = settings()
+    payment = args.payment or config.get("E2E_PAYMENT") or "wallet"
+    check(payment in {"wallet", "card"}, "E2E_PAYMENT must be wallet or card.")
     url = origin(args.api or config.get("PUBLIC_API_URL") or "http://127.0.0.1:8000")
     token = require(config, "ADMIN_TOKEN")
     with PayPalClient(config) as pp, httpx.Client(base_url=url, headers={"X-Admin-Token":token},
                 follow_redirects=False, timeout=httpx.Timeout(240, connect=10)) as api, locked_journal(args.state, "operator-demo") as state:
-        demo = Demo(state, api, pp, config, args.payment, getattr(args, "require_mode", "live"))
+        demo = Demo(state, api, pp, config, payment, getattr(args, "require_mode", "live"))
         demo.connect(url)
         action(demo)
         summary = {k:state.data[k] for k in ("workspace_id", "health", "warm", "sessions")}
@@ -417,7 +419,7 @@ def execute(args, action):
 def arguments(parser):
     parser.add_argument("--api", help="Backend origin. Defaults to PUBLIC_API_URL or the local backend.")
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE, help="Private, resumable workspace state under logs/.")
-    parser.add_argument("--payment", choices=["wallet", "card"], default="wallet")
+    parser.add_argument("--payment", choices=["wallet", "card"], help="Defaults to E2E_PAYMENT or wallet. Uses the selected method for new sandbox orders.")
     return parser
 
 
