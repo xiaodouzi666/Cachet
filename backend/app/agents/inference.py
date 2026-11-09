@@ -1,0 +1,23 @@
+from backend.app.agents.tasks import STEPS, turn_question
+from backend.app.config import manifest
+from backend.app.gateway.prompt_builder import token_hash
+
+
+def live_turns(engine, prefix, owners, tenant, task, buy, quote_text, max_output=150):
+    messages = []
+    for i,step in enumerate(STEPS):
+        question = turn_question(task,i,step)
+        if i == 0:
+            question += "\nQuote: " + quote_text
+        messages.append(("user",question))
+        prompt = prefix.build(engine, owners, tenant, messages, buy)
+        if len(prompt.ids) + max_output > manifest()["context_window"]:
+            raise ValueError("The conversation exceeds the model window")
+        yield {"kind":"estimate","prompt_tokens":len(prompt.ids),"output_limit":max_output,
+               "spans":prompt.spans,"turn":i+1}
+        result = engine.generate(prompt.ids, max_new_tokens=max_output)
+        if result["prompt_tokens"] != len(prompt.ids):
+            raise ValueError("The engine reported an unexpected prompt length")
+        result.update(turn=i+1,spans=prompt.spans,input_hash=token_hash(prompt.ids),mode="live")
+        messages.append(("assistant",result["text"]))
+        yield {"kind":"result",**result}
