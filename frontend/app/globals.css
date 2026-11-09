@@ -1,0 +1,26 @@
+:root {
+  color-scheme: light;
+  background: #f7f7f5;
+  color: #111827;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  margin: 12vh auto;
+  max-width: 64rem;
+  padding: 0 2rem;
+}
+
+h1 {
+  color: #0f766e;
+  font-size: clamp(2rem, 6vw, 4rem);
+  margin-bottom: 0.5rem;
+}
+
+p {
+  font-size: 1.25rem;
+}

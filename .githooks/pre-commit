@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+forbidden=$(git diff --cached --name-only --diff-filter=ACMRT -- AGENTS.md docs/internal .env ':(glob)**/.env' ':(glob)**/.env.*' ':(exclude,glob)**/.env.example')
+if [ -n "$forbidden" ]; then
+    echo "Private project files cannot be committed." >&2
+    exit 1
+fi
+scanner=.tools/bin/gitleaks
+if [ ! -x "$scanner" ]; then scanner=gitleaks; fi
+if ! command -v "$scanner" >/dev/null; then
+    echo "Install Gitleaks v8.28.0 or later before committing." >&2
+    exit 1
+fi
+exec "$scanner" git --pre-commit --staged --redact --no-banner
