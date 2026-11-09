@@ -31,3 +31,34 @@ def test_spike_requires_historical_variance():
     assert volume_signal(10, [0] * 7) is None
     assert volume_signal(10, [2, 1]) is None
     assert volume_signal(100, [5, 5, 6, 5, 4, 5, 5]) > 3
+
+
+def test_same_payer_suppresses_only_its_layer_on_a_real_gpu_trace():
+    """Counterfactual ownership of recorded traffic, without posting a test payment."""
+    from backend.app.agents.anomaly import receiver_digest, same_payer_layers
+    from backend.app.config import calibration
+    from backend.app.gateway.billing import Span, price_call
+    from backend.app.models import Publisher
+    from backend.app.replay.recordings import load
+
+    trace = load("rate-limit", True)["turns"][0]
+    spans = [Span(**span) for span in trace["spans"]]
+    fit = calibration()["fit"]
+    evidence = dict(spans=spans, cached_tokens=trace["cached_tokens"], output_tokens=trace["output_tokens"],
+                    alpha=fit["alpha"], beta=fit["beta"])
+    # These are ephemeral principals for an identity equality test. No provider IDs
+    # or transactions are created, inserted in the database, or returned as results.
+    principal, other = uuid4().hex, uuid4().hex
+    mailbox = uuid4().hex  # Compare canonicalized strings without constructing a recipient address.
+    pubs = {"starlette": Publisher(paypal_receiver_email=mailbox.upper()),
+            "fastapi": Publisher(linked_payer_id=other)}
+    owners = same_payer_layers({"payer_id": principal, "email_digest": receiver_digest(mailbox)}, pubs)
+    normal = price_call(**evidence)
+    suppressed = price_call(**evidence, self_publishers=owners)
+    assert owners == {"starlette"}
+    assert suppressed.charge_micros == normal.charge_micros
+    assert normal.royalty_micros["starlette"] > 0 and suppressed.royalty_micros["starlette"] == 0
+    assert suppressed.royalty_micros["fastapi"] == normal.royalty_micros["fastapi"] > 0
+    assert suppressed.platform_micros - normal.platform_micros == normal.royalty_micros["starlette"]
+    assert same_payer_layers({"payer_id": other}, pubs) == {"fastapi"}
+    assert same_payer_layers({"payer_id": None}, pubs) == set()

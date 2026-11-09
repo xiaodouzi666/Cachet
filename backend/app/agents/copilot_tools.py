@@ -121,6 +121,10 @@ def call_details(db, ws, call_id):
         if p:
             lines.append(f"{p.name} ({pid}) was allocated {usd(n)}; a linear split gives "
                          f"{usd(c.linear_royalty_json.get(pid, 0))}.")
+    for span in c.spans_json:
+        if span.get("self_royalty_suppressed"):
+            lines.append(f"Call {c.id} hit {span['hits']:,} tokens in {span['slug']}. Its verified buyer "
+                         "also receives this publisher's payments, so the call earned zero royalties on that layer.")
     if c.sla_breach:
         lines.append("This call exceeded the warm-latency SLA.")
     if c.fault_injected_ms:
@@ -151,6 +155,8 @@ def ledger_activity(db, ws):
 def anomaly_signals(db, ws):
     lines = []
     for s in activity(db, ws):
+        if s["self_use_hits"]:
+            lines.append(f"{s['name']} had {s['self_use_hits']:,} same-payer hits today. These hits earned zero royalties.")
         z = s["z_score"]
         if z is None:
             result = "A z-score requires seven comparable historical days with nonzero variance."
