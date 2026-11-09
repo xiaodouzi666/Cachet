@@ -1,0 +1,47 @@
+name: Public API health
+
+on:
+  schedule:
+    - cron: "13,43 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: public-api-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    if: ${{ vars.CACHET_PUBLIC_API_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Read Cachet health
+        id: probe
+        env:
+          PUBLIC_API_URL: ${{ vars.CACHET_PUBLIC_API_URL }}
+        run: |
+          set -euo pipefail
+          [[ "$PUBLIC_API_URL" == https://* ]]
+          curl --proto '=https' --max-time 30 --retry 2 --retry-delay 3 --fail --silent --show-error \
+            "${PUBLIC_API_URL%/}/api/health" -o "$RUNNER_TEMP/health.json"
+          jq -e '.service == "cachet-api" and (.version | type == "string" and length > 0)
+                 and .paypal_configured == true and (.mode == "live" or .mode == "replay" or .mode == "hosted")' \
+            "$RUNNER_TEMP/health.json" >/dev/null
+
+      - name: Open one issue per outage
+        if: ${{ failure() && steps.probe.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="Cachet public API health check failed"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json title)"
+          if ! jq -e --arg title "$title" 'any(.[]; .title == $title)' <<< "$existing" >/dev/null; then
+            echo "The public endpoint did not return a usable Cachet health response." > "$RUNNER_TEMP/issue.md"
+            echo >> "$RUNNER_TEMP/issue.md"
+            echo "[Inspect the run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})." >> "$RUNNER_TEMP/issue.md"
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/issue.md"
+          fi
