@@ -1414,3 +1414,9 @@ td {
 .segment-dialog th {
   font-size: 0.93rem;
 }
+
+.royalty-widget .royalty-scope {
+  display: block;
+  font: 400 0.72rem var(--sans);
+  color: var(--muted);
+}

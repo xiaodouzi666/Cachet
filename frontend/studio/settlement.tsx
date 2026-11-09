@@ -76,7 +76,16 @@ function RoyaltyTree() {
       <li key={row.id}>
         <div>
           <GitBranch size={15} />
-          <span>{row.title}</span>
+          <span>
+            {row.title}
+            {row.scope && (
+              <small className="royalty-scope">
+                {row.scope === "published"
+                  ? "Your publication"
+                  : "From your purchases"}
+              </small>
+            )}
+          </span>
           <small>{count(row.hit_tokens)} hits</small>
           <b>
             {usd(basis === "linear" ? row.linear_micros : row.shapley_micros)}

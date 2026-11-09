@@ -106,6 +106,7 @@ export type Bench = {
   gpu?: string;
 };
 export type Royalty = {
+  scope?: "published" | "purchased";
   id: string;
   parent_id: string | null;
   title: string;
