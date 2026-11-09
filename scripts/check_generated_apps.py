@@ -151,14 +151,35 @@ def assess_record(track):
     return {"application_check": final, "verified_application_turn": None}
 
 
-def main():
+def reproduce(task, buy):
     from backend.app.replay.recordings import load
 
+    track = load(task, buy)
+    evidence = assess_record(track)
+    for key, observed in evidence.items():
+        recorded = track.get(key)
+        if isinstance(observed, dict) and observed.get("status") == "failed":
+            if (
+                recorded.get("status") == "failed"
+                and observed["answer_sha256"] == recorded["answer_sha256"]
+            ):
+                continue
+        if observed != recorded:
+            raise ValueError("Reproduced HTTP evidence differs from the recording")
+    return evidence
+
+
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--build",
         action="store_true",
         help="Build the public dependency image before checking",
+    )
+    parser.add_argument(
+        "--require-passed",
+        action="store_true",
+        help="Require every final module to pass its full HTTP check and match the recording.",
     )
     args = parser.parse_args()
     if args.build:
@@ -167,23 +188,29 @@ def main():
             input=(ROOT / "scripts/generated_app.Dockerfile").read_bytes(),
             check=True,
         )
+    from backend.app.replay.recordings import DIRECTORY
+
+    manifest = DIRECTORY / "sha256.json"
+    initial_index = manifest.read_bytes() if args.require_passed else None
+    failures = []
     for task in TASKS:
         for buy in (True, False):
-            track = load(task, buy)
-            evidence = assess_record(track)
-            for key, observed in evidence.items():
-                recorded = track.get(key)
-                if isinstance(observed, dict) and observed.get("status") == "failed":
-                    if (
-                        recorded.get("status") == "failed"
-                        and observed["answer_sha256"] == recorded["answer_sha256"]
-                    ):
-                        continue
-                if observed != recorded:
-                    raise ValueError(
-                        "Reproduced HTTP evidence differs from the recording"
-                    )
-            print(task, "buy" if buy else "compute", json.dumps(evidence), flush=True)
+            decision = "buy" if buy else "compute"
+            try:
+                evidence = reproduce(task, buy)
+            except ValueError as exc:
+                if not args.require_passed:
+                    raise
+                failures.append(f"{task}/{decision}: {exc}")
+                continue
+            print(task, decision, json.dumps(evidence), flush=True)
+            final = evidence["application_check"]
+            if args.require_passed and final["status"] != "passed":
+                failures.append(f"{task}/{decision}: {final['reason']}")
+    if args.require_passed and manifest.read_bytes() != initial_index:
+        failures.append("The recording index changed during the HTTP checks. Rerun on a stable archive.")
+    if failures:
+        parser.exit(1, "Final HTTP acceptance failed:\n" + "\n".join(failures) + "\n")
 
 
 if __name__ == "__main__":

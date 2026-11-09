@@ -77,7 +77,9 @@ The benchmark used Qwen2.5-7B-Instruct-AWQ, SGLang 0.5.23 and an NVIDIA GeForce 
 | 16,000 | 4,160 ms | 47 ms |
 | 26,000 | 8,432 ms | 69 ms |
 
-A separate ten-turn FastAPI rate-limiting task produced its first text in 186 ms using the shared prefix and 8,277 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.045621 and $0.056174 respectively, before any SLA adjustments. Two of the ten shared calls met the 138.152 ms warm SLA. Those two calls accounted for 1,390 microdollars of Starlette royalties and 682 microdollars of FastAPI royalties at the default tariff. The two conversations produced their own outputs. In a network-isolated container, three of the four unchanged final modules passed their task’s HTTP checks. The private-compute Starlette example returned HTTP 500. Its failed check appears with the original response. The shared FastAPI answer included prose around its working module. These amounts describe metered usage. [Paired benchmark and fit](bench/results/calibration.json) · [Session comparison](bench/results/sessions.json)
+A separate ten-turn FastAPI rate-limiting task produced its first text in 186 ms using the shared prefix and 8,277 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.045621 and $0.056174 respectively, before any SLA adjustments. Two of the ten shared calls met the 138.152 ms warm SLA. Those two calls accounted for 1,390 microdollars of Starlette royalties and 682 microdollars of FastAPI royalties at the default tariff. The two conversations produced their own outputs. These amounts describe metered usage. The shared FastAPI answer included prose around its working module.
+
+All four final generated modules passed the isolated HTTP checks. For both Starlette strategies, `/ping` returned JSON with `X-Route-Class: custom`, an unknown URL returned 404, and a second endpoint inherited the same header from the route subclass. Both FastAPI modules enforced independent client quotas and restored access after 60 seconds. [Paired benchmark and fit](bench/results/calibration.json) · [Session comparison](bench/results/sessions.json)
 
 ## AI components
 
@@ -111,6 +113,12 @@ make e2e
 ```
 
 `make verify` runs unit and non-PayPal integration tests. With a configured GPU it includes real generation, cache flushes and tenant isolation. `make verify-full` also requires sandbox credentials and provisioned accounts. `make e2e` uses real provider operations in a dedicated judge workspace. See [the sandbox sequence and acceptance instructions](docs/pricing.md). To reproduce the five-band benchmark use `.venv-sglang/bin/python -m bench.calibrate`. Local charts and checked-in traces do not require GPU installation to inspect.
+
+With Docker running, verify the actual final modules over loopback HTTP inside network-isolated containers:
+
+```sh
+.venv/bin/python -m scripts.check_generated_apps --build --require-passed
+```
 
 ## Prior work and scope
 

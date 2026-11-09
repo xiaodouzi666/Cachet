@@ -8,8 +8,8 @@ test("renders actual archived application outcomes separately from metering", as
 }) => {
   await page.goto("/dev/ui");
   const tasks: Task[] = await (await request.get("/api/tasks")).json();
-  const archive = page.locator(".archive-prefix"),
-    outcomes = new Set<string>();
+  const archive = page.locator(".archive-prefix");
+  const outcomes: Record<string, string> = {};
   for (const task of tasks) {
     await archive.getByLabel("Recorded coding task").selectOption(task.id);
     for (const decision of ["buy", "compute"]) {
@@ -28,7 +28,7 @@ test("renders actual archived application outcomes separately from metering", as
       expect(run.decision).toBe(decision);
       expect(run.application_check).toBeTruthy();
       const check = run.application_check!;
-      outcomes.add(check.status);
+      outcomes[task.id + "/" + decision] = check.status;
       await expect(primary).toHaveAttribute("data-task", task.id);
       await expect(primary).toHaveAttribute("data-decision", decision);
       const receipt = primary.getByRole("region", {
@@ -108,5 +108,10 @@ test("renders actual archived application outcomes separately from metering", as
       }
     }
   }
-  expect(outcomes.has("passed") && outcomes.has("failed")).toBe(true);
+  expect(outcomes).toEqual({
+    "rate-limit/buy": "passed",
+    "rate-limit/compute": "passed",
+    "route-class/buy": "passed",
+    "route-class/compute": "passed",
+  });
 });

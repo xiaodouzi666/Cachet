@@ -30,16 +30,15 @@ from backend.app.replay.recordings import (
 OUTPUT_LIMIT = MAX_OUTPUT_TOKENS
 
 
-def capture(engine, task_id, buy, model):
+def capture(engine, task_id, buy, model, *, public_salt=None):
     slug, task = TASKS[task_id]
     prefix = Prefix(engine, slug)
     owners = {name: name for name, _ in prefix.layers}
     engine.flush()
     if buy and prefix.warm(engine) < 0.95:
         raise ValueError("Warm probe missed its threshold")
-    tenant = secrets.token_hex(
-        4
-    )  # A public recording salt, never a real workspace salt.
+    # Only public archive salts enter these recordings.
+    tenant = public_salt if public_salt is not None else secrets.token_hex(4)
     q = quote(sum(len(ids) for _, ids in prefix.layers), len(STEPS), 0.25 if buy else 0)
     results = live_turns(
         engine,
@@ -93,12 +92,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", choices=TASKS)
     parser.add_argument(
+        "--decision", choices=("buy", "compute"),
+        help="Select only this strategy. By default, process both.",
+    )
+    parser.add_argument(
         "--verify-only",
         action="store_true",
         help="Re-tokenize the checked-in inputs without generating new completions.",
     )
+    parser.add_argument(
+        "--reuse-recorded-salt", action="store_true",
+        help="Regenerate with the public salt from the selected archived run for a controlled comparison.",
+    )
     args = parser.parse_args()
+    if args.reuse_recorded_salt and (args.verify_only or not args.task or not args.decision):
+        parser.error("--reuse-recorded-salt requires --task and --decision in capture mode")
     tasks = [args.task] if args.task else list(TASKS)
+    decisions = (True, False) if args.decision is None else (args.decision == "buy",)
     # A directory lock avoids concurrent recorders flushing the same cache or losing digest updates.
     directory_fd = os.open(DIRECTORY, os.O_RDONLY)
     try:
@@ -111,18 +121,19 @@ def main():
                 raise ValueError("SGLang is serving a different model")
             updates = []
             for task_id in tasks:
-                for buy in (True, False):
+                for buy in decisions:
                     output = path(task_id, buy)
                     if args.verify_only:
                         verify_inputs(engine, load(task_id, buy))
                     else:
-                        record = capture(engine, task_id, buy, model)
+                        salt = load(task_id, buy)["tenant"] if args.reuse_recorded_salt else None
+                        record = capture(engine, task_id, buy, model, public_salt=salt)
                         updates.append((output, record))
                     print(output.name, len(STEPS), "input hashes verified", flush=True)
             if updates:
                 publish(updates)
                 for task_id in tasks:
-                    for buy in (True, False):
+                    for buy in decisions:
                         load(task_id, buy)
     finally:
         os.close(directory_fd)

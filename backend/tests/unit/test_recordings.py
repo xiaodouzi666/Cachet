@@ -104,3 +104,26 @@ def test_fastapi_review_uses_the_contract_in_the_existing_dialogue():
     compact_turns = [i + 1 for i, q in enumerate(questions) if CONTRACTS[task] not in q]
     assert compact_turns == [7, 8]
     assert all("200, 200, 429" in questions[i - 1] for i in compact_turns)
+
+
+def test_starlette_review_diagnoses_raw_headers_in_the_mapping_parameter():
+    from backend.app.agents.tasks import STEPS, TASKS, turn_question
+
+    def review(expression):
+        previous = "\n".join((
+            "```python",
+            "from starlette.datastructures import MutableHeaders",
+            "def customize(message):",
+            f"    headers = MutableHeaders({expression})",
+            "    headers['X-Route-Class'] = 'custom'",
+            "```",
+        ))
+        return turn_question(TASKS["route-class"][1], 6, STEPS[6], previous=previous)
+
+    # The original failure compiled successfully. Diagnose it before a new HTTP check.
+    for expression in ("message.get('headers', [])", "message['headers']"):
+        prompt = review(expression)
+        assert "Line 3: MutableHeaders(" in prompt
+        assert "Replace that constructor call with MutableHeaders(scope=message)" in prompt
+    for expression in ("scope=message", "raw=message['headers']", "{'x': 'y'}"):
+        assert "Replace that constructor call" not in review(expression)

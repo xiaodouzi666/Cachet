@@ -134,18 +134,30 @@
       "decision": "compute",
       "turns": 10,
       "generated_application_check": {
-        "answer_sha256": "99a9a32a533a5fe8c5c21e4aa5ece9ca6d23a27c4cc4ce45db2a14b1b203ef43",
+        "answer_sha256": "37817a3fd20bb1cc08f127fc43aceaa420a325e590ee93ee69542368e95da843",
         "requested_format_met": true,
-        "status": "failed",
-        "reason": "AssertionError: Unexpected route response 500, header=None"
+        "source_sha256": "ae36682f7e69935249c51acc1cd4f977e9ec73eedceb954d8e35fd1b3db9c3d1",
+        "http": {
+          "status_codes": [
+            200,
+            404,
+            200
+          ],
+          "subclass_probe": true,
+          "success_body": {
+            "pong": true
+          },
+          "x_route_class": "custom"
+        },
+        "status": "passed"
       },
-      "verified_application_turn": null,
+      "verified_application_turn": 10,
       "source": "backend/app/replay/traces/route-class-compute.json",
-      "first_ttft_ms": 3030.002,
-      "median_ttft_ms": 132.208,
-      "cached_tokens": 129224,
-      "output_tokens": 1591,
-      "priced_usage_micros": 31466,
+      "first_ttft_ms": 2934.142,
+      "median_ttft_ms": 133.109,
+      "cached_tokens": 128610,
+      "output_tokens": 1431,
+      "priced_usage_micros": 31108,
       "sla_breach_turns": [],
       "royalties_on_sla_compliant_turns_micros": {},
       "publisher_royalty_micros": 0

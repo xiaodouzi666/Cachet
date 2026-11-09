@@ -22,13 +22,13 @@
       "kind": "result",
       "prompt_tokens": 12362,
       "cached_tokens": 0,
-      "ttft_ms": 3030.002,
-      "engine_ttft_ms": 3030.001,
+      "ttft_ms": 2934.142,
+      "engine_ttft_ms": 2934.141,
       "fault_injected_ms": 0.0,
-      "total_ms": 5156.233,
-      "output_tokens": 267,
+      "total_ms": 4138.016,
+      "output_tokens": 153,
       "finish_reason": "stop",
-      "text": "Using Starlette's Route class, we minimize cold start costs by leveraging cached middleware and handle methods. This strategy ensures quick response times for the first request, optimizing for both compute and cold start times. Here\u2019s the code:\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse, PlainTextResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        headers = MutableHeaders(request.headers)\n        headers.append(\"X-Route-Class\", \"custom\")\n        return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute()])\n```\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse, PlainTextResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        headers = MutableHeaders(request.headers)\n        headers.append(\"X-Route-Class\", \"custom\")\n        return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute()])\n```",
+      "text": "Using Starlette's Route class, we minimize cold start costs by leveraging its built-in handling and middleware capabilities. This strategy ensures efficient request routing and reduces initial compute time, aligning with the provided microcosts. \n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse, PlainTextResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({'pong': True})\n        response.headers['X-Route-Class'] = 'custom'\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 1,
       "spans": [
         {
@@ -61,15 +61,15 @@
     },
     {
       "kind": "result",
-      "prompt_tokens": 12899,
-      "cached_tokens": 12629,
-      "ttft_ms": 116.652,
-      "engine_ttft_ms": 116.651,
+      "prompt_tokens": 12777,
+      "cached_tokens": 12515,
+      "ttft_ms": 113.023,
+      "engine_ttft_ms": 113.022,
       "fault_injected_ms": 0.0,
-      "total_ms": 690.932,
-      "output_tokens": 72,
+      "total_ms": 1858.448,
+      "output_tokens": 219,
       "finish_reason": "stop",
-      "text": "Feature requirements:\n- Implement a custom route for GET /ping.\n- Return JSONResponse({'pong': True}).\n- Add X-Route-Class: custom to the response headers.\n\nMeasurable acceptance conditions:\n- GET /ping returns JSON {'pong': True}.\n- Response headers include X-Route-Class: custom.\n- Route is registered with Starlette.",
+      "text": "### Feature Requirements and Measurable Acceptance Conditions\n\n- **Feature**: Implement a custom route in Starlette that handles GET requests to `/ping` and returns JSON response `{'pong': True}`.\n- **Acceptance Conditions**:\n  - The route should add the header `X-Route-Class: custom` to the response.\n  - The route should be registered with the Starlette application.\n  - The application should respond with `{'pong': True}` when accessing `/ping`.\n  - The response should include the header `X-Route-Class: custom`.\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({'pong': True})\n        response.headers['X-Route-Class'] = 'custom'\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 2,
       "spans": [
         {
@@ -94,23 +94,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 12899
+          "end": 12777
         }
       ],
-      "input_hash": "e830ac4f98171f735911d9c20effce0d755c8bce25df0705b3151b9a55a2b749",
+      "input_hash": "83e40679f9dedb4be7e60f738ff657a38996932e693891590e112094c5602c59",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13219,
-      "cached_tokens": 12971,
-      "ttft_ms": 108.936,
-      "engine_ttft_ms": 108.935,
+      "prompt_tokens": 13260,
+      "cached_tokens": 12996,
+      "ttft_ms": 115.111,
+      "engine_ttft_ms": 115.108,
       "fault_injected_ms": 0.0,
-      "total_ms": 1378.436,
-      "output_tokens": 157,
+      "total_ms": 631.328,
+      "output_tokens": 65,
       "finish_reason": "stop",
-      "text": "Relevant framework classes:\n- `Starlette` from `starlette.applications`\n- `Route` from `starlette.routing`\n- `JSONResponse` from `starlette.responses`\n- `MutableHeaders` from `starlette.datastructures`\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        headers = MutableHeaders(request.headers)\n        headers.append(\"X-Route-Class\", \"custom\")\n        return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute()])\n```",
+      "text": "### Locate Relevant Framework Classes\n\nThe relevant classes are found in `starlette/applications.py` and `starlette/routing.py`.\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n```",
       "turn": 3,
       "spans": [
         {
@@ -135,23 +135,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 13219
+          "end": 13260
         }
       ],
-      "input_hash": "7ffcaa2f5a47c68f54209b96e31b3d86928e221725d353c8fc9b0d9e36a97c75",
+      "input_hash": "6e1acea7bd6e08e345de1b9b448ae479588e53a149cd2287cabea89516f0e42d",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13637,
-      "cached_tokens": 13376,
-      "ttft_ms": 120.523,
-      "engine_ttft_ms": 120.522,
+      "prompt_tokens": 13586,
+      "cached_tokens": 13325,
+      "ttft_ms": 116.61,
+      "engine_ttft_ms": 116.609,
       "fault_injected_ms": 0.0,
-      "total_ms": 1419.136,
-      "output_tokens": 159,
+      "total_ms": 1550.77,
+      "output_tokens": 177,
       "finish_reason": "stop",
-      "text": "Request path:\n1. `Starlette` receives the request.\n2. `Router` matches the route.\n3. `CustomRoute` handles the request.\n4. `endpoint` returns `JSONResponse`.\n5. `MutableHeaders` sets the header.\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        headers = MutableHeaders(request.headers)\n        headers.append(\"X-Route-Class\", \"custom\")\n        return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute()])\n```",
+      "text": "### Trace the Request Path\n\n1. **Request** is received by `Starlette`.\n2. `Starlette` routes the request to `CustomRoute`.\n3. `CustomRoute.handle` processes the request.\n4. `CustomRoute.endpoint` returns `JSONResponse`.\n5. `JSONResponse` sets the header `X-Route-Class: custom`.\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({'pong': True})\n        response.headers['X-Route-Class'] = 'custom'\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 4,
       "spans": [
         {
@@ -176,23 +176,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 13637
+          "end": 13586
         }
       ],
-      "input_hash": "f4ed8e1ff657a98abc4884926596904f397b35fcefd10153a39d24960844ebcc",
+      "input_hash": "23d24ef0fbd1facee861c9eeab55abe9c4d84c06168d23219457f134f07c30c2",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 14059,
-      "cached_tokens": 13796,
-      "ttft_ms": 121.297,
-      "engine_ttft_ms": 121.297,
+      "prompt_tokens": 14026,
+      "cached_tokens": 13763,
+      "ttft_ms": 118.14,
+      "engine_ttft_ms": 118.139,
       "fault_injected_ms": 0.0,
-      "total_ms": 1890.793,
-      "output_tokens": 214,
+      "total_ms": 1689.68,
+      "output_tokens": 192,
       "finish_reason": "stop",
-      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        headers = MutableHeaders(request.headers)\n        headers.append(\"X-Route-Class\", \"custom\")\n        return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute()])\n```\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        headers = MutableHeaders(request.headers)\n        headers.append(\"X-Route-Class\", \"custom\")\n        return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute()])\n```",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({'pong': True})\n        response.headers['X-Route-Class'] = 'custom'\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({'pong': True})\n        response.headers['X-Route-Class'] = 'custom'\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 5,
       "spans": [
         {
@@ -217,23 +217,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 14059
+          "end": 14026
         }
       ],
-      "input_hash": "1a28cd341ff963c7a6b450d7fdb5de3e0eea1fbffa48c9c62cc4e6e66f306b0e",
+      "input_hash": "23e0dd054e7f6adeebc4e6a7661d0eb2fbd12e5adf8913a867b1fa24f0e8130f",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 14709,
-      "cached_tokens": 14273,
-      "ttft_ms": 181.415,
-      "engine_ttft_ms": 181.414,
+      "prompt_tokens": 14654,
+      "cached_tokens": 14218,
+      "ttft_ms": 175.322,
+      "engine_ttft_ms": 175.321,
       "fault_injected_ms": 0.0,
-      "total_ms": 1460.249,
-      "output_tokens": 153,
+      "total_ms": 1292.128,
+      "output_tokens": 135,
       "finish_reason": "stop",
-      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(message.get('headers', []))\n                headers['X-Route-Class'] = 'custom'\n                message['headers'] = headers.raw\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                MutableHeaders(scope=message)['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
       "turn": 6,
       "spans": [
         {
@@ -258,24 +258,24 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 14709
+          "end": 14654
         }
       ],
-      "input_hash": "91db9ea1e27dbc56797a1af278231de2eae09647cf7a9651fc57bb28111112b9",
+      "input_hash": "fe5ca0c525d18f3d95f7121aa0bbe6715e923df321ec0779f677f564cf8dc5e7",
       "mode": "live",
-      "http_feedback": "HTTP smoke failed. AttributeError: 'list' object has no attribute 'items' | AssertionError: Unexpected route response 500, header=None"
+      "http_feedback": "HTTP smoke passed: {\"status_codes\": [200, 404, 200], \"subclass_probe\": true, \"success_body\": {\"pong\": true}, \"x_route_class\": \"custom\"}"
     },
     {
       "kind": "result",
-      "prompt_tokens": 15171,
-      "cached_tokens": 14862,
-      "ttft_ms": 136.517,
-      "engine_ttft_ms": 136.516,
+      "prompt_tokens": 15115,
+      "cached_tokens": 14789,
+      "ttft_ms": 142.301,
+      "engine_ttft_ms": 142.3,
       "fault_injected_ms": 0.0,
-      "total_ms": 1424.555,
-      "output_tokens": 153,
+      "total_ms": 1274.105,
+      "output_tokens": 135,
       "finish_reason": "stop",
-      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(message.get('headers', []))\n                headers['X-Route-Class'] = 'custom'\n                message['headers'] = headers.raw\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                MutableHeaders(scope=message)['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
       "turn": 7,
       "spans": [
         {
@@ -300,23 +300,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 15171
+          "end": 15115
         }
       ],
-      "input_hash": "15f87da33f55cfb46c2d420a5283d4721096c7d54cc466a774c70fc072b48c3e",
+      "input_hash": "2d64fb2dc46fad893e579b09cf70f33619064a96b5a705e490e21fef8ae27131",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 15589,
-      "cached_tokens": 15324,
-      "ttft_ms": 127.899,
-      "engine_ttft_ms": 127.898,
+      "prompt_tokens": 15515,
+      "cached_tokens": 15250,
+      "ttft_ms": 123.918,
+      "engine_ttft_ms": 123.917,
       "fault_injected_ms": 0.0,
-      "total_ms": 1062.821,
-      "output_tokens": 110,
+      "total_ms": 836.02,
+      "output_tokens": 85,
       "finish_reason": "stop",
-      "text": "To check the successful path, send a GET request to `/ping` and assert the response contains `{'pong': True}` and the header `X-Route-Class: custom`.\n\n```python\nimport pytest\nfrom starlette.testclient import TestClient\n\ndef test_custom_route():\n    client = TestClient(app)\n    response = client.get('/ping')\n    assert response.json() == {'pong': True}\n    assert 'X-Route-Class' in response.headers\n    assert response.headers['X-Route-Class'] == 'custom'\n```",
+      "text": "To check the successful path, send HTTP GET requests to `/ping` and `/` (for 404) and verify the response body and headers:\n\n```plaintext\nGET /ping HTTP/1.1\nHost: localhost\n\nExpected: {\"pong\": true}, X-Route-Class: custom\n\nGET / HTTP/1.1\nHost: localhost\n\nExpected: 404 Not Found\n```",
       "turn": 8,
       "spans": [
         {
@@ -341,23 +341,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 15589
+          "end": 15515
         }
       ],
-      "input_hash": "367ef7b6925322343596a70fd2a004bab2bbe4d5f707333b55e37bbed3627776",
+      "input_hash": "11aca4f79a342af8603929eff117c8dc9361fe944b224d96e04f29d27ffd1988",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 16141,
-      "cached_tokens": 15699,
-      "ttft_ms": 189.602,
-      "engine_ttft_ms": 189.601,
+      "prompt_tokens": 16019,
+      "cached_tokens": 15600,
+      "ttft_ms": 184.771,
+      "engine_ttft_ms": 184.771,
       "fault_injected_ms": 0.0,
-      "total_ms": 1511.941,
-      "output_tokens": 153,
+      "total_ms": 1336.291,
+      "output_tokens": 135,
       "finish_reason": "stop",
-      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(message.get('headers', []))\n                headers['X-Route-Class'] = 'custom'\n                message['headers'] = headers.raw\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                MutableHeaders(scope=message)['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
       "turn": 9,
       "spans": [
         {
@@ -382,24 +382,24 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 16141
+          "end": 16019
         }
       ],
-      "input_hash": "e7700895cf1cb2f346c6171354866952bf383e1c52631c89cb6655eee9b92877",
+      "input_hash": "c24974174758319dec22e2a5824dde7de700e809417e16e8a5053fa1bf539e2f",
       "mode": "live",
-      "http_feedback": "HTTP smoke failed. AttributeError: 'list' object has no attribute 'items' | AssertionError: Unexpected route response 500, header=None"
+      "http_feedback": "HTTP smoke passed: {\"status_codes\": [200, 404, 200], \"subclass_probe\": true, \"success_body\": {\"pong\": true}, \"x_route_class\": \"custom\"}"
     },
     {
       "kind": "result",
-      "prompt_tokens": 16800,
-      "cached_tokens": 16294,
-      "ttft_ms": 214.459,
-      "engine_ttft_ms": 214.459,
+      "prompt_tokens": 16680,
+      "cached_tokens": 16154,
+      "ttft_ms": 225.415,
+      "engine_ttft_ms": 225.414,
       "fault_injected_ms": 0.0,
-      "total_ms": 1549.444,
-      "output_tokens": 153,
+      "total_ms": 1396.504,
+      "output_tokens": 135,
       "finish_reason": "stop",
-      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(message.get('headers', []))\n                headers['X-Route-Class'] = 'custom'\n                message['headers'] = headers.raw\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                MutableHeaders(scope=message)['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({'pong': True})\n\napp = Starlette(routes=[CustomRoute('/ping', endpoint=ping)])\n```",
       "turn": 10,
       "spans": [
         {
@@ -424,19 +424,31 @@
           "kind": "private",
           "owner": "turns",
           "start": 12017,
-          "end": 16800
+          "end": 16680
         }
       ],
-      "input_hash": "457820b4a5d7e2637ecb4d78a6e0b419fa7b8dac8eadc0768659a253ce85ba76",
+      "input_hash": "e3eb1661d73eebc92ddf58a31ff46f6d74d3ad7a65868576ad048b23512a2a87",
       "mode": "live"
     }
   ],
-  "recorded_at": "2026-11-09T06:40:04.906809+00:00",
+  "recorded_at": "2026-11-09T07:45:58.788946+00:00",
   "application_check": {
-    "answer_sha256": "99a9a32a533a5fe8c5c21e4aa5ece9ca6d23a27c4cc4ce45db2a14b1b203ef43",
+    "answer_sha256": "37817a3fd20bb1cc08f127fc43aceaa420a325e590ee93ee69542368e95da843",
     "requested_format_met": true,
-    "status": "failed",
-    "reason": "AssertionError: Unexpected route response 500, header=None"
+    "source_sha256": "ae36682f7e69935249c51acc1cd4f977e9ec73eedceb954d8e35fd1b3db9c3d1",
+    "http": {
+      "status_codes": [
+        200,
+        404,
+        200
+      ],
+      "subclass_probe": true,
+      "success_body": {
+        "pong": true
+      },
+      "x_route_class": "custom"
+    },
+    "status": "passed"
   },
-  "verified_application_turn": null
+  "verified_application_turn": 10
 }

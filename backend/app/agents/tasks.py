@@ -1,5 +1,6 @@
 """The public coding contracts and conversation with actual compiler feedback."""
 
+import ast
 import builtins
 import re
 import symtable
@@ -64,7 +65,34 @@ def app_code(text, *, allow_prose=False):
     return blocks[0]
 
 
-def diagnostic(text):
+def starlette_header_diagnostic(source):
+    """Find a raw ASGI header list passed as MutableHeaders' positional mapping."""
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "MutableHeaders":
+            continue
+        match node.args[0]:
+            case ast.Subscript(value=event, slice=ast.Constant(value="headers")):
+                pass
+            case ast.Call(
+                func=ast.Attribute(value=event, attr="get"),
+                args=[ast.Constant(value="headers"), *_],
+            ):
+                pass
+            case _:
+                continue
+        expression = ast.unparse(event)
+        return (
+            f"Line {node.lineno}: {ast.unparse(node)} passes a list of byte pairs as a mapping. "
+            "The first parameter calls .items(), which an ASGI header list does not support. "
+            f"Replace that constructor call with MutableHeaders(scope={expression}). "
+            "Set the header on that view and forward the same response-start event."
+        )
+    return ""
+
+
+def diagnostic(text, task):
     """Compile only. This process never imports or executes model-generated source."""
     blocks = FENCE.findall(text)
     if not blocks:
@@ -104,6 +132,10 @@ def diagnostic(text):
                     else ""
                 )
             )
+            if task == TASKS["route-class"][1]:
+                hint = starlette_header_diagnostic(source)
+                if hint:
+                    findings.append(hint)
     return "\nPython syntax check of the preceding answer:\n" + "\n".join(findings)
 
 
@@ -145,7 +177,7 @@ def turn_question(
     )
     if step == 0:
         return q + ("\nQuote: " + quote_text if quote_text is not None else "")
-    q += diagnostic(previous)
+    q += diagnostic(previous, task)
     if http_feedback:
         q += (
             "\nIndependent sandbox HTTP check of the preceding proposal: "
@@ -153,6 +185,18 @@ def turn_question(
         )
     if contract and step in (5, 8, 9):
         q += "\nFramework API reference for this application:\n" + FRAMEWORK_NOTES[task]
+    if (
+        task == TASKS["route-class"][1]
+        and http_feedback
+        and http_feedback.startswith("HTTP smoke failed.")
+    ):
+        q += (
+            "\nThe HTTP verifier also mounts your Route subclass with a different path and endpoint. "
+            "Keep the inherited Route constructor: a no-argument __init__ prevents that second mount. "
+            "The endpoint only returns its response. The subclass's handle must wrap ASGI send "
+            "to update the outgoing http.response.start event with MutableHeaders(scope=message). "
+            "Apply the correction to the module itself."
+        )
     if step == 9 and http_feedback:
         if http_feedback.startswith("HTTP smoke passed:"):
             q += "\nRepeat the preceding working module verbatim, including all its imports, in a single fenced python block."
