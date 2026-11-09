@@ -1,0 +1,53 @@
+{
+  "method": "Four separate deterministic GPU conversations. Default tariff applied to the recorded counters. No funds moved.",
+  "runs": [
+    {
+      "task": "rate-limit",
+      "decision": "buy",
+      "turns": 10,
+      "source": "backend/app/replay/traces/rate-limit-buy.json",
+      "first_ttft_ms": 97.182,
+      "median_ttft_ms": 79.988,
+      "cached_tokens": 269039,
+      "output_tokens": 1500,
+      "priced_usage_micros": 43542,
+      "publisher_royalty_micros": 10360
+    },
+    {
+      "task": "rate-limit",
+      "decision": "compute",
+      "turns": 10,
+      "source": "backend/app/replay/traces/rate-limit-compute.json",
+      "first_ttft_ms": 8240.952,
+      "median_ttft_ms": 82.032,
+      "cached_tokens": 243032,
+      "output_tokens": 1500,
+      "priced_usage_micros": 53966,
+      "publisher_royalty_micros": 0
+    },
+    {
+      "task": "route-class",
+      "decision": "buy",
+      "turns": 10,
+      "source": "backend/app/replay/traces/route-class-buy.json",
+      "first_ttft_ms": 70.236,
+      "median_ttft_ms": 50.106,
+      "cached_tokens": 130100,
+      "output_tokens": 1500,
+      "priced_usage_micros": 22659,
+      "publisher_royalty_micros": 4800
+    },
+    {
+      "task": "route-class",
+      "decision": "compute",
+      "turns": 10,
+      "source": "backend/app/replay/traces/route-class-compute.json",
+      "first_ttft_ms": 2958.621,
+      "median_ttft_ms": 49.291,
+      "cached_tokens": 118095,
+      "output_tokens": 1500,
+      "priced_usage_micros": 27461,
+      "publisher_royalty_micros": 0
+    }
+  ]
+}
