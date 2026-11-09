@@ -19,3 +19,13 @@ make dev
 The development servers bind to loopback. Use `make verify` for unit tests and non-PayPal integration tests, or `make verify-full` with the GPU and sandbox services configured. The commit hook scans the staged changes and requires Gitleaks on PATH or at `.tools/bin/gitleaks`.
 
 `make e2e` is reserved for the sandbox demo in T1.13. `make bench` invokes the TTFT benchmark once it has been implemented.
+
+## Local GPU
+
+On a Linux NVIDIA machine with a compatible CUDA toolkit, install uv and provision the pinned inference environment and model:
+
+```sh
+scripts/start_sglang.sh --install
+```
+
+Set a random project-specific `SGLANG_API_KEY` in `.env`, then run `scripts/start_sglang.sh`. The engine listens on loopback and writes to `logs/sglang.log`. GPU integration tests use this dedicated instance and clear its prefix cache. With a configured key, a failed connection fails verification.
