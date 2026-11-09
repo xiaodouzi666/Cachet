@@ -46,10 +46,13 @@ def verify(journal):
     with httpx.Client(headers={"Authorization": "Bearer " + key}, timeout=90) as client:
         for name, field, actual in (("get_order_details", "order_id", order_id),
                                     ("list_transactions", "transaction_id", capture_id)):
+            selected = [tool for tool in tools if tool["function"]["name"] == name]
+            if len(selected) != 1:
+                raise RuntimeError(f"Expected one official Toolkit definition for {name}.")
             response = client.post(base + "/chat/completions", json={
-                "model": model, "temperature": 0, "max_tokens": 256, "tools": tools,
+                "model": model, "temperature": 0, "max_tokens": 256, "tools": selected,
                 "tool_choice": {"type": "function", "function": {"name": name}},
-                "messages": [{"role": "user", "content": f"Use {name} for this {field}: {actual}."}],
+                "messages": [{"role": "user", "content": f"Call {name} once with only the {field} argument. The {field} is {actual}"}],
             }).raise_for_status()
             calls = response.json()["choices"][0]["message"].get("tool_calls") or []
             if len(calls) != 1 or calls[0]["function"]["name"] != name:

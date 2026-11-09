@@ -37,6 +37,7 @@ def main() -> int:
             "sglang.launch_server",
             "--model-path", ".cache/models/Qwen2.5-7B-Instruct-AWQ",
             "--served-model-name", "Qwen/Qwen2.5-7B-Instruct-AWQ",
+            "--tool-call-parser", "qwen25",
             "--context-length", "32768",
             "--host", url.hostname,
             "--port", str(url.port or 80),

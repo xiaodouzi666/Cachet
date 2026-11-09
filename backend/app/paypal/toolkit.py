@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import subprocess
 import sys
 from functools import lru_cache
@@ -51,6 +52,15 @@ def run_tool(name, arguments, *, order_ids, transaction_ids):
     return _worker({"method": name, "arguments": arguments, "ids": selected})
 
 
+def reporting_filters(params):
+    filters = {k: v for k, v in params.items() if v is not None and v != "None"}
+    # Toolkit 1.11.0 emits six fractional digits. PayPal Reporting accepts whole seconds.
+    for field in ("start_date", "end_date"):
+        if field in filters:
+            filters[field] = re.sub(r"(\d{2}:\d{2}:\d{2})\.\d+", r"\1", filters[field])
+    return filters
+
+
 class ReportingTransport:
     """Use the real sandbox client behind the SDK's read handlers, restricting resource access."""
 
@@ -66,8 +76,7 @@ class ReportingTransport:
                 return self.pp.get_order(self.order_id)
             if path.path != "/v1/reporting/transactions" or path.netloc or path.scheme:
                 raise ValueError("Unexpected SDK endpoint.")
-            filters = {k: v for k, v in (payload or dict(parse_qsl(path.query))).items()
-                       if v is not None and v != "None"}
+            filters = reporting_filters(payload or dict(parse_qsl(path.query)))
             data = self.pp.list_transactions(filters)
             # In 1.11.0 the ID-search handler expects a JSON string. The list handler
             # expects a mapping and includes its absent optional filters as 'None'.
