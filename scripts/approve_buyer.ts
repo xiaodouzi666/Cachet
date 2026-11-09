@@ -58,6 +58,18 @@ function lostFrame(error) {
   return /execution context was destroyed|frame was detached|frame has been detached|element was detached from the dom|cannot find context with specified id/i.test(error.message);
 }
 
+async function fillCheckoutField(field, value) {
+  try {
+    await field.fill(value, { timeout: 1200 });
+    return true;
+  } catch (error) {
+    // The email step can disappear while the sandbox switches to its password form.
+    // Re-read the page; never submit the old step after its field disappeared.
+    if (error.name === "TimeoutError" && !(await field.isVisible())) return false;
+    throw error;
+  }
+}
+
 function browserError(error) {
   // Playwright call logs can include credentials. Only report fixed diagnostic categories.
   if (error instanceof CheckoutError) return error.message;
@@ -118,8 +130,8 @@ async function approveSandboxPopup(page, {email, password, returnUrl, orderId, e
     let acted = false;
     for (const frame of frames) {
       try {
-        const emailField = frame.locator('input[type="email"], #email').first();
-        const passField = frame.locator('input[type="password"]').first();
+        const emailField = frame.locator('input:is([type="email"], #email):not([readonly]):not([disabled])').filter({visible:true}).first();
+        const passField = frame.locator('input[type="password"]:not([readonly]):not([disabled])').filter({visible:true}).first();
         const login = frame.getByRole("button", { name: /^(log in|sign in|inloggen)$/i }).first();
         const approval = frame.getByRole("button", { name: /^(agree (&|and) (continue|pay)|pay now|complete purchase|continue to review|continue to payment|continue to checkout|continue to merchant|authorize|continue)$/i }).first();
         let button;
@@ -127,12 +139,12 @@ async function approveSandboxPopup(page, {email, password, returnUrl, orderId, e
         const next = nextButton(frame);
         const hasEmail = await emailField.isVisible();
         if (hasEmail && await canClick(next)) {
-          await emailField.fill(email);
+          if (!(await fillCheckoutField(emailField, email))) continue;
           button = next;
           phase = "email";
         } else if (await passField.isVisible()) {
-          if (hasEmail) await emailField.fill(email);
-          await passField.fill(password);
+          if (hasEmail && !(await fillCheckoutField(emailField, email))) continue;
+          if (!(await fillCheckoutField(passField, password))) continue;
           button = await passwordSubmit(passField, login);
           phase = "login";
         } else if (await approval.isVisible()) {
@@ -194,7 +206,7 @@ async function approveSandboxPopup(page, {email, password, returnUrl, orderId, e
   throw new CheckoutError("Sandbox checkout did not return. Approve this order manually if PayPal requested verification.");
 }
 
-module.exports = { approveSandboxPopup, nextButton, passwordSubmit, plainPay };
+module.exports = { approveSandboxPopup, nextButton, passwordSubmit, plainPay, fillCheckoutField };
 
 if (require.main === module) main().catch(error => {
   console.error(browserError(error));

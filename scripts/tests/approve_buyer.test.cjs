@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const { createRequire } = require("node:module");
 const fromFrontend = createRequire(require.resolve("../../frontend/package.json"));
 const { chromium } = fromFrontend("playwright");
-const { nextButton, passwordSubmit, plainPay } = require("../approve_buyer.ts");
+const { nextButton, passwordSubmit, plainPay, fillCheckoutField } = require("../approve_buyer.ts");
 
 test("choose only the intended login and order controls", async () => {
   const browser = await chromium.launch({channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || undefined});
@@ -12,6 +12,12 @@ test("choose only the intended login and order controls", async () => {
     const page = await browser.newPage({offline: true});
     await page.setContent('<form><input type="email"><button id="btnNext">Volgende</button></form>');
     assert.equal(await nextButton(page).getAttribute("id"), "btnNext");
+    const email = page.locator('input[type="email"]').filter({visible:true}).first();
+    assert.equal(await email.isVisible(), true);
+    // The live sandbox keeps the previous email field in the DOM after advancing.
+    await page.setContent('<input type="email" hidden><input type="password">');
+    assert.equal(await fillCheckoutField(email, "buyer@example.test"), false);
+    assert.equal(await fillCheckoutField(page.locator('input[type="password"]'), "test-only"), true);
     await page.setContent('<button>Previous</button>');
     assert.equal(await nextButton(page).count(), 0);
 
