@@ -8,8 +8,21 @@ from typing import Mapping
 from sqlalchemy import func, select
 
 from .models import (
-    AgentRun, Call, Capture, CaptureAllocation, LedgerEntry, LedgerTxn, Mandate,
-    PayoutBatch, PayoutItem, Publisher, Refund, utcnow,
+    AgentRun,
+    Call,
+    Capture,
+    CaptureAllocation,
+    LedgerEntry,
+    LedgerTxn,
+    Mandate,
+    PayoutBatch,
+    PayoutItem,
+    Publisher,
+    Refund,
+    utcnow,
+    Context,
+    MarketListing,
+    Workspace,
 )
 from .money import MICROS_PER_CENT, allocate, round_cents
 
@@ -34,32 +47,107 @@ def payable(publisher_id):
 
 
 def balance(session, workspace_id, account) -> int:
-    return session.scalar(select(func.coalesce(func.sum(LedgerEntry.debit_micros - LedgerEntry.credit_micros), 0))
-                          .where(LedgerEntry.workspace_id == workspace_id, LedgerEntry.account == account))
+    return session.scalar(
+        select(
+            func.coalesce(
+                func.sum(LedgerEntry.debit_micros - LedgerEntry.credit_micros), 0
+            )
+        ).where(
+            LedgerEntry.workspace_id == workspace_id, LedgerEntry.account == account
+        )
+    )
 
 
 def _txn(session, ref_type, ref_id):
-    return session.scalar(select(LedgerTxn).where(LedgerTxn.ref_type == ref_type, LedgerTxn.ref_id == ref_id))
+    return session.scalar(
+        select(LedgerTxn).where(
+            LedgerTxn.ref_type == ref_type, LedgerTxn.ref_id == ref_id
+        )
+    )
+
+
+INTERWORKSPACE = "platform:marketplace_clearing"
 
 
 def post(session, workspace_id, ref_type, ref_id, changes: Mapping[str, int]) -> bool:
+    """Route canonical public royalties between balanced books in the same SQLite transaction."""
+    buyer = dict(changes)
+    sellers = defaultdict(dict)
+    for account, delta in changes.items():
+        if (
+            not delta
+            or not account.startswith("publisher:")
+            or not account.endswith(":payable")
+        ):
+            continue
+        publisher = session.get(Publisher, account.split(":")[1])
+        if not publisher:
+            raise LedgerError("Unknown publisher account")
+        if publisher.workspace_id != workspace_id:
+            public = session.scalar(
+                select(MarketListing.context_id)
+                .join(Context, Context.id == MarketListing.context_id)
+                .where(Context.publisher_id == publisher.id)
+                .limit(1)
+            )
+            if (
+                not public
+                or session.get(Workspace, workspace_id).kind != "user"
+                or ref_type
+                not in {
+                    "call",
+                    "uncaptured_dispute",
+                    "uncaptured_sla",
+                    "refund",
+                    "refund_credit",
+                }
+            ):
+                raise LedgerError("Invalid cross-workspace royalty")
+            sellers[publisher.workspace_id][account] = delta
+            del buyer[account]
+            buyer[INTERWORKSPACE] = buyer.get(INTERWORKSPACE, 0) + delta
+    for seller, entries in sellers.items():
+        entries[INTERWORKSPACE] = -sum(entries.values())
+        # Seller statements expose only this local settlement reference, never the buyer's call or refund ID.
+        reference = sha256(f"{ref_type}/{ref_id}/{seller}".encode()).hexdigest()
+        _post(session, seller, "marketplace_" + ref_type, reference, entries)
+    return _post(session, workspace_id, ref_type, ref_id, buyer)
+
+
+def _post(session, workspace_id, ref_type, ref_id, changes: Mapping[str, int]) -> bool:
     """Insert one balanced journal or verify an identical retry within the enclosing transaction."""
-    if any(type(n) is not int or not account for account, n in changes.items()) or sum(changes.values()) != 0:
+    if (
+        any(type(n) is not int or not account for account, n in changes.items())
+        or sum(changes.values()) != 0
+    ):
         raise LedgerError("Every journal must balance in integer microdollars")
     expected = {k: v for k, v in changes.items() if v}
     existing = _txn(session, ref_type, ref_id)
     if existing:
-        rows = session.scalars(select(LedgerEntry).where(LedgerEntry.txn_id == existing.id))
-        if existing.workspace_id != workspace_id or {r.account: r.debit_micros - r.credit_micros for r in rows} != expected:
+        rows = session.scalars(
+            select(LedgerEntry).where(LedgerEntry.txn_id == existing.id)
+        )
+        if (
+            existing.workspace_id != workspace_id
+            or {r.account: r.debit_micros - r.credit_micros for r in rows} != expected
+        ):
             raise LedgerError("A previously posted reference has different entries")
         return False
     txn = LedgerTxn(workspace_id=workspace_id, ref_type=ref_type, ref_id=ref_id)
     session.add(txn)
     session.flush()
     for account, delta in expected.items():
-        session.add(LedgerEntry(workspace_id=workspace_id, txn_id=txn.id, account=account,
-                                debit_micros=max(0, delta), credit_micros=max(0, -delta),
-                                ref_type=ref_type, ref_id=ref_id))
+        session.add(
+            LedgerEntry(
+                workspace_id=workspace_id,
+                txn_id=txn.id,
+                account=account,
+                debit_micros=max(0, delta),
+                credit_micros=max(0, -delta),
+                ref_type=ref_type,
+                ref_id=ref_id,
+            )
+        )
     session.flush()
     return True
 
@@ -71,16 +159,23 @@ class Parts:
     royalties: dict[str, int]
 
     def __post_init__(self):
-        if (type(self.public) is not int or type(self.principal) is not int or
-                not 0 <= self.public <= self.principal or any(type(n) is not int or n < 0 for n in self.royalties.values())
-                or sum(self.royalties.values()) > self.public):
+        if (
+            type(self.public) is not int
+            or type(self.principal) is not int
+            or not 0 <= self.public <= self.principal
+            or any(type(n) is not int or n < 0 for n in self.royalties.values())
+            or sum(self.royalties.values()) > self.public
+        ):
             raise LedgerError("The charge decomposition is inconsistent")
 
     def portion(self, amount):
         if not 0 <= amount <= self.principal:
             raise LedgerError("Cannot allocate more than the remaining principal")
         names = sorted(self.royalties)
-        weights = [self.principal - self.public, self.public - sum(self.royalties.values())]
+        weights = [
+            self.principal - self.public,
+            self.public - sum(self.royalties.values()),
+        ]
         weights.extend(self.royalties[k] for k in names)
         private, _, *royalties = allocate(amount, weights)
         return Parts(amount, amount - private, dict(zip(names, royalties)))
@@ -96,7 +191,9 @@ class Parts:
         remaining = self.royalties.copy()
         for owner, n in other.royalties.items():
             remaining[owner] = remaining.get(owner, 0) - n
-        return Parts(self.principal - other.principal, self.public - other.public, remaining)
+        return Parts(
+            self.principal - other.principal, self.public - other.public, remaining
+        )
 
     def earned(self, sign):
         accounts = {payable(owner): sign * n for owner, n in self.royalties.items()}
@@ -105,8 +202,11 @@ class Parts:
 
 
 def _call_mandate(session, call):
-    return session.scalars(select(Mandate).join(AgentRun, AgentRun.mandate_id == Mandate.id)
-                           .where(AgentRun.id == call.run_id, Mandate.workspace_id == call.workspace_id)).one()
+    return session.scalars(
+        select(Mandate)
+        .join(AgentRun, AgentRun.mandate_id == Mandate.id)
+        .where(AgentRun.id == call.run_id, Mandate.workspace_id == call.workspace_id)
+    ).one()
 
 
 def _parts(call):
@@ -121,10 +221,13 @@ def accrue_call(session, call):
     if call.platform_micros != parts.principal - sum(parts.royalties.values()):
         raise LedgerError("Platform revenue and royalties do not sum to the charge")
     if parts.royalties:
-        owners = set(session.scalars(select(Publisher.id).where(Publisher.workspace_id == call.workspace_id,
-                                                                   Publisher.id.in_(parts.royalties))))
+        owners = set(
+            session.scalars(
+                select(Publisher.id).where(Publisher.id.in_(parts.royalties))
+            )
+        )
         if owners != set(parts.royalties):
-            raise LedgerError("Unknown publisher in this workspace")
+            raise LedgerError("Unknown royalty publisher")
     changes = parts.earned(-1)
     changes[receivable(mandate.consumer_id)] = parts.principal
     if _txn(session, "call", call.id):
@@ -132,7 +235,10 @@ def accrue_call(session, call):
         return
     if mandate.status not in {"ACTIVE", "AUTHORIZED"} or not mandate.authorization_id:
         raise LedgerError("Accrual requires an active authorized mandate")
-    if mandate.accrued_uncaptured_micros + mandate.captured_micros + parts.principal > mandate.cap_micros:
+    if (
+        mandate.accrued_uncaptured_micros + mandate.captured_micros + parts.principal
+        > mandate.cap_micros
+    ):
         raise LedgerError("Authorization cap exceeded")
     if post(session, call.workspace_id, "call", call.id, changes):
         mandate.accrued_uncaptured_micros += parts.principal
@@ -144,8 +250,16 @@ def _allocation_parts(item):
 
 
 def _open_parts(session, call):
-    parts = _parts(call).minus(Parts(call.reversed_micros, call.reversed_public_micros, call.reversed_royalty_json))
-    for item in session.scalars(select(CaptureAllocation).where(CaptureAllocation.call_id == call.id)):
+    parts = _parts(call).minus(
+        Parts(
+            call.reversed_micros,
+            call.reversed_public_micros,
+            call.reversed_royalty_json,
+        )
+    )
+    for item in session.scalars(
+        select(CaptureAllocation).where(CaptureAllocation.call_id == call.id)
+    ):
         parts = parts.minus(_allocation_parts(item))
     return parts
 
@@ -167,7 +281,9 @@ def reverse_uncaptured(session, call, *, reason="sla"):
         mandate.accrued_uncaptured_micros -= parts.principal
         call.reversed_micros += parts.principal
         call.reversed_public_micros += parts.public
-        call.reversed_royalty_json = _combine(call.reversed_royalty_json, parts.royalties)
+        call.reversed_royalty_json = _combine(
+            call.reversed_royalty_json, parts.royalties
+        )
     return parts.principal
 
 
@@ -179,8 +295,12 @@ def _combine(previous, delta):
 
 
 def _open_calls(session, mandate):
-    return session.scalars(select(Call).join(AgentRun, AgentRun.id == Call.run_id)
-                           .where(AgentRun.mandate_id == mandate.id).order_by(Call.created_at, Call.id))
+    return session.scalars(
+        select(Call)
+        .join(AgentRun, AgentRun.id == Call.run_id)
+        .where(AgentRun.mandate_id == mandate.id)
+        .order_by(Call.created_at, Call.id)
+    )
 
 
 def record_capture(session, capture):
@@ -195,8 +315,11 @@ def record_capture(session, capture):
     cash = capture.amount_cents * MICROS_PER_CENT
     pending = mandate.accrued_uncaptured_micros
     to_settle = pending if capture.final else cash
-    if (cash > mandate.cap_micros - mandate.captured_micros or to_settle > pending
-            or (capture.final and capture.amount_cents != round_cents(pending))):
+    if (
+        cash > mandate.cap_micros - mandate.captured_micros
+        or to_settle > pending
+        or (capture.final and capture.amount_cents != round_cents(pending))
+    ):
         raise LedgerError("Confirmed capture differs from the authorized accrual")
     remainder = to_settle
     ids = []
@@ -207,18 +330,34 @@ def record_capture(session, capture):
         if not open_parts.principal:
             continue
         part = open_parts.portion(min(remainder, open_parts.principal))
-        session.add(CaptureAllocation(workspace_id=mandate.workspace_id, capture_id=capture.id,
-                                      call_id=call.id, principal_micros=part.principal,
-                                      public_micros=part.public, royalty_json=part.royalties))
+        session.add(
+            CaptureAllocation(
+                workspace_id=mandate.workspace_id,
+                capture_id=capture.id,
+                call_id=call.id,
+                principal_micros=part.principal,
+                public_micros=part.public,
+                royalty_json=part.royalties,
+            )
+        )
         remainder -= part.principal
         ids.append(call.id)
     if remainder:
         raise LedgerError("Open calls do not cover the capture")
     capture.call_ids_json = ids
     fee = capture.fee_cents * MICROS_PER_CENT
-    post(session, mandate.workspace_id, "capture", capture.id, {
-        CLEARING: cash - fee, FEES: fee, receivable(mandate.consumer_id): -to_settle, ROUNDING: to_settle - cash,
-    })
+    post(
+        session,
+        mandate.workspace_id,
+        "capture",
+        capture.id,
+        {
+            CLEARING: cash - fee,
+            FEES: fee,
+            receivable(mandate.consumer_id): -to_settle,
+            ROUNDING: to_settle - cash,
+        },
+    )
     mandate.captured_micros += cash
     mandate.accrued_uncaptured_micros -= to_settle
     mandate.last_activity_at = utcnow()
@@ -230,9 +369,16 @@ def close_dust(session, mandate):
     if round_cents(pending):
         raise LedgerError("The remaining balance requires a final capture")
     if pending:
-        post(session, mandate.workspace_id, "close_dust", mandate.id, {
-            ROUNDING: pending, receivable(mandate.consumer_id): -pending,
-        })
+        post(
+            session,
+            mandate.workspace_id,
+            "close_dust",
+            mandate.id,
+            {
+                ROUNDING: pending,
+                receivable(mandate.consumer_id): -pending,
+            },
+        )
         mandate.accrued_uncaptured_micros = 0
 
 
@@ -247,28 +393,48 @@ def plan_refund(session, capture, call_ids, *, reason):
     if not ids or not ids <= set(capture.call_ids_json):
         raise LedgerError("Refund calls must belong to the captured principal")
     portions = {}
-    allocations = session.scalars(select(CaptureAllocation).where(CaptureAllocation.capture_id == capture.id,
-                                                                  CaptureAllocation.call_id.in_(ids)))
+    allocations = session.scalars(
+        select(CaptureAllocation).where(
+            CaptureAllocation.capture_id == capture.id,
+            CaptureAllocation.call_id.in_(ids),
+        )
+    )
     for item in allocations:
         if reason == "sla" and not session.get(Call, item.call_id).sla_breach:
             raise LedgerError("An SLA refund requires a measured breach")
-        refunded = Parts(item.refunded_micros, item.refunded_public_micros, item.refunded_royalty_json)
+        refunded = Parts(
+            item.refunded_micros,
+            item.refunded_public_micros,
+            item.refunded_royalty_json,
+        )
         part = _allocation_parts(item).minus(refunded).for_reason(reason)
         if part.principal:
             portions[item.call_id] = part
-    used = session.scalar(select(func.coalesce(func.sum(Refund.amount_cents), 0))
-                          .join(LedgerTxn, (LedgerTxn.ref_id == Refund.id) & (LedgerTxn.ref_type == "refund"))
-                          .where(Refund.capture_id == capture.id))
-    prior_principal = session.scalar(select(func.coalesce(func.sum(CaptureAllocation.refunded_micros), 0))
-                                     .where(CaptureAllocation.capture_id == capture.id))
+    used = session.scalar(
+        select(func.coalesce(func.sum(Refund.amount_cents), 0))
+        .join(
+            LedgerTxn,
+            (LedgerTxn.ref_id == Refund.id) & (LedgerTxn.ref_type == "refund"),
+        )
+        .where(Refund.capture_id == capture.id)
+    )
+    prior_principal = session.scalar(
+        select(func.coalesce(func.sum(CaptureAllocation.refunded_micros), 0)).where(
+            CaptureAllocation.capture_id == capture.id
+        )
+    )
     additional = sum(part.principal for part in portions.values())
-    return RefundPlan(refund_cents(capture.amount_cents, used, prior_principal, additional), portions)
+    return RefundPlan(
+        refund_cents(capture.amount_cents, used, prior_principal, additional), portions
+    )
 
 
 def refund_cents(capture_cents, paid_cents, prior_principal, additional_principal):
     """Round cumulative entitlements once for a capture, including sub-cent claims."""
-    if (min(capture_cents, paid_cents, prior_principal, additional_principal) < 0
-            or paid_cents > capture_cents):
+    if (
+        min(capture_cents, paid_cents, prior_principal, additional_principal) < 0
+        or paid_cents > capture_cents
+    ):
         raise LedgerError("Invalid cumulative refund")
     if not additional_principal:
         return 0
@@ -280,14 +446,20 @@ def _refund_entries(session, capture, portions):
     changes = defaultdict(int)
     principal = 0
     for call_id, part in portions.items():
-        item = session.scalars(select(CaptureAllocation).where(CaptureAllocation.capture_id == capture.id,
-                                                               CaptureAllocation.call_id == call_id)).one()
+        item = session.scalars(
+            select(CaptureAllocation).where(
+                CaptureAllocation.capture_id == capture.id,
+                CaptureAllocation.call_id == call_id,
+            )
+        ).one()
         for account, amount in part.earned(+1).items():
             changes[account] += amount
         principal += part.principal
         item.refunded_micros += part.principal
         item.refunded_public_micros += part.public
-        item.refunded_royalty_json = _combine(item.refunded_royalty_json, part.royalties)
+        item.refunded_royalty_json = _combine(
+            item.refunded_royalty_json, part.royalties
+        )
     return changes, principal
 
 
@@ -298,15 +470,30 @@ def apply_refund_credit(session, capture, call_ids, *, reason):
         raise LedgerError("The customer is still due a PayPal refund")
     if not plan.portions:
         return None
-    confirmations = list(session.scalars(select(Refund.paypal_refund_id).where(
-        Refund.capture_id == capture.id, Refund.status == "COMPLETED").order_by(Refund.created_at)))
+    confirmations = list(
+        session.scalars(
+            select(Refund.paypal_refund_id)
+            .where(Refund.capture_id == capture.id, Refund.status == "COMPLETED")
+            .order_by(Refund.created_at)
+        )
+    )
     if not confirmations or not all(confirmations):
         raise LedgerError("No confirmed PayPal refund covers this credit")
     changes, principal = _refund_entries(session, capture, plan.portions)
     changes[ROUNDING] = -principal
     key = sha256((",".join(sorted(plan.portions))).encode()).hexdigest()
-    post(session, capture.workspace_id, "refund_credit", f"{capture.id}:{reason}:{key}", changes)
-    return {"amount_cents": 0, "covered_micros": principal, "prior_paypal_refund_ids": confirmations}
+    post(
+        session,
+        capture.workspace_id,
+        "refund_credit",
+        f"{capture.id}:{reason}:{key}",
+        changes,
+    )
+    return {
+        "amount_cents": 0,
+        "covered_micros": principal,
+        "prior_paypal_refund_ids": confirmations,
+    }
 
 
 def record_refund(session, refund):
@@ -331,10 +518,20 @@ def record_refund(session, refund):
 
 
 def available_payable(session, workspace_id, publisher_id):
-    reserved = session.scalar(select(func.coalesce(func.sum(PayoutItem.amount_cents), 0))
-                              .where(PayoutItem.workspace_id == workspace_id, PayoutItem.publisher_id == publisher_id,
-                                     PayoutItem.status.not_in((*PAID, "FAILED", "DENIED", "CANCELED", "RETURNED"))))
-    return max(0, -balance(session, workspace_id, payable(publisher_id)) - reserved * MICROS_PER_CENT)
+    reserved = session.scalar(
+        select(func.coalesce(func.sum(PayoutItem.amount_cents), 0)).where(
+            PayoutItem.workspace_id == workspace_id,
+            PayoutItem.publisher_id == publisher_id,
+            PayoutItem.status.not_in(
+                (*PAID, "FAILED", "DENIED", "CANCELED", "RETURNED")
+            ),
+        )
+    )
+    return max(
+        0,
+        -balance(session, workspace_id, payable(publisher_id))
+        - reserved * MICROS_PER_CENT,
+    )
 
 
 def record_payout(session, item, *, fee_cents=None):
@@ -346,14 +543,25 @@ def record_payout(session, item, *, fee_cents=None):
     if type(fee) is not int or fee < 0:
         raise LedgerError("Invalid payout fee")
     cash = item.amount_cents * MICROS_PER_CENT
-    if post(session, item.workspace_id, "payout", item.id, {
-        payable(item.publisher_id): cash, CLEARING: -cash - fee * MICROS_PER_CENT, FEES: fee * MICROS_PER_CENT,
-    }):
+    if post(
+        session,
+        item.workspace_id,
+        "payout",
+        item.id,
+        {
+            payable(item.publisher_id): cash,
+            CLEARING: -cash - fee * MICROS_PER_CENT,
+            FEES: fee * MICROS_PER_CENT,
+        },
+    ):
         item.fee_cents = fee
         session.flush()
         batch = session.get(PayoutBatch, item.batch_id)
-        batch.fee_cents = session.scalar(select(func.coalesce(func.sum(PayoutItem.fee_cents), 0))
-                                        .where(PayoutItem.batch_id == item.batch_id, PayoutItem.status.in_(PAID)))
+        batch.fee_cents = session.scalar(
+            select(func.coalesce(func.sum(PayoutItem.fee_cents), 0)).where(
+                PayoutItem.batch_id == item.batch_id, PayoutItem.status.in_(PAID)
+            )
+        )
 
 
 def _totals(session, key, amount, *criteria, refund_mandates=False):
@@ -366,37 +574,107 @@ def _totals(session, key, amount, *criteria, refund_mandates=False):
 def assert_invariants(session, *, workspace_id=None, expected_clearing_micros=None):
     """Check local accounting. Supply an independently GET-verified total for external reconciliation."""
     session.flush()
-    where = lambda model: [model.workspace_id == workspace_id] if workspace_id is not None else []
+    where = lambda model: (
+        [model.workspace_id == workspace_id] if workspace_id is not None else []
+    )
     net = LedgerEntry.debit_micros - LedgerEntry.credit_micros
-    unbalanced = session.execute(select(LedgerEntry.txn_id).where(*where(LedgerEntry)).group_by(LedgerEntry.txn_id)
-                                 .having(func.sum(net) != 0).limit(1)).first()
+    unbalanced = session.execute(
+        select(LedgerEntry.txn_id)
+        .where(*where(LedgerEntry))
+        .group_by(LedgerEntry.txn_id)
+        .having(func.sum(net) != 0)
+        .limit(1)
+    ).first()
     if unbalanced:
         raise LedgerError("Unbalanced transaction: " + unbalanced[0])
-    captured = _totals(session, Capture.mandate_id, Capture.amount_cents, Capture.status.in_(CAPTURED), *where(Capture))
-    refunded = _totals(session, Capture.mandate_id, Refund.amount_cents, Refund.status == "COMPLETED",
-                       *where(Refund), refund_mandates=True)
+    captured = _totals(
+        session,
+        Capture.mandate_id,
+        Capture.amount_cents,
+        Capture.status.in_(CAPTURED),
+        *where(Capture),
+    )
+    refunded = _totals(
+        session,
+        Capture.mandate_id,
+        Refund.amount_cents,
+        Refund.status == "COMPLETED",
+        *where(Refund),
+        refund_mandates=True,
+    )
     for mandate in session.scalars(select(Mandate).where(*where(Mandate))):
-        if (mandate.captured_micros != captured.get(mandate.id, 0) * MICROS_PER_CENT or
-                mandate.refunded_micros != refunded.get(mandate.id, 0) * MICROS_PER_CENT or
-                not 0 <= mandate.refunded_micros <= mandate.captured_micros <= mandate.cap_micros):
-            raise LedgerError(f"Mandate totals differ from settlement records: {mandate.id}")
-    cash = _totals(session, Capture.workspace_id, Capture.amount_cents - Capture.fee_cents,
-                   Capture.status.in_(CAPTURED), *where(Capture))
-    returns = _totals(session, Refund.workspace_id, Refund.amount_cents - Refund.fee_reversal_cents,
-                      Refund.status == "COMPLETED", *where(Refund))
-    payouts = _totals(session, PayoutItem.workspace_id, PayoutItem.amount_cents + PayoutItem.fee_cents,
-                      PayoutItem.status.in_(PAID), *where(PayoutItem))
-    clearing = _totals(session, LedgerEntry.workspace_id, net, LedgerEntry.account == CLEARING, *where(LedgerEntry))
+        if (
+            mandate.captured_micros != captured.get(mandate.id, 0) * MICROS_PER_CENT
+            or mandate.refunded_micros != refunded.get(mandate.id, 0) * MICROS_PER_CENT
+            or not 0
+            <= mandate.refunded_micros
+            <= mandate.captured_micros
+            <= mandate.cap_micros
+        ):
+            raise LedgerError(
+                f"Mandate totals differ from settlement records: {mandate.id}"
+            )
+    cash = _totals(
+        session,
+        Capture.workspace_id,
+        Capture.amount_cents - Capture.fee_cents,
+        Capture.status.in_(CAPTURED),
+        *where(Capture),
+    )
+    returns = _totals(
+        session,
+        Refund.workspace_id,
+        Refund.amount_cents - Refund.fee_reversal_cents,
+        Refund.status == "COMPLETED",
+        *where(Refund),
+    )
+    payouts = _totals(
+        session,
+        PayoutItem.workspace_id,
+        PayoutItem.amount_cents + PayoutItem.fee_cents,
+        PayoutItem.status.in_(PAID),
+        *where(PayoutItem),
+    )
+    clearing = _totals(
+        session,
+        LedgerEntry.workspace_id,
+        net,
+        LedgerEntry.account == CLEARING,
+        *where(LedgerEntry),
+    )
     for wid in cash.keys() | returns.keys() | payouts.keys() | clearing.keys():
-        expected = (cash.get(wid, 0) - returns.get(wid, 0) - payouts.get(wid, 0)) * MICROS_PER_CENT
+        expected = (
+            cash.get(wid, 0) - returns.get(wid, 0) - payouts.get(wid, 0)
+        ) * MICROS_PER_CENT
         if clearing.get(wid, 0) != expected:
             raise LedgerError("PayPal clearing does not match local settlement records")
-    pending = _totals(session, Mandate.consumer_id, Mandate.accrued_uncaptured_micros, *where(Mandate))
-    outstanding = _totals(session, LedgerEntry.account, net, LedgerEntry.account.like("consumer:%:receivable"),
-                          *where(LedgerEntry))
-    expected_receivables = {receivable(consumer): amount for consumer, amount in pending.items() if amount}
-    if {account: amount for account, amount in outstanding.items() if amount} != expected_receivables:
-        raise LedgerError("Consumer receivable differs from total pending mandate accruals")
+    pending = _totals(
+        session, Mandate.consumer_id, Mandate.accrued_uncaptured_micros, *where(Mandate)
+    )
+    outstanding = _totals(
+        session,
+        LedgerEntry.account,
+        net,
+        LedgerEntry.account.like("consumer:%:receivable"),
+        *where(LedgerEntry),
+    )
+    expected_receivables = {
+        receivable(consumer): amount for consumer, amount in pending.items() if amount
+    }
+    if {
+        account: amount for account, amount in outstanding.items() if amount
+    } != expected_receivables:
+        raise LedgerError(
+            "Consumer receivable differs from total pending mandate accruals"
+        )
+    if workspace_id is None:
+        cross = session.scalar(
+            select(func.coalesce(func.sum(net), 0)).where(
+                LedgerEntry.account == INTERWORKSPACE
+            )
+        )
+        if cross:
+            raise LedgerError("Marketplace interworkspace clearing does not cancel")
     observed = sum(clearing.values())
     if expected_clearing_micros is not None and expected_clearing_micros != observed:
         raise LedgerError("PayPal clearing differs from confirmed PayPal readbacks")

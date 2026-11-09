@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.app.config import value
 from backend.app.db import session_scope
-from backend.app.models import AgentRun, Call, Mandate, Workspace, utcnow
+from backend.app.models import AgentRun, Call, LedgerEntry, Mandate, Workspace, utcnow
 from backend.app.operations import Control, RunEvent
 from backend.app.paypal.reconciliation import reconcile
 from backend.app.settlement.audit import audit
@@ -58,6 +58,11 @@ def maintain():
                     Workspace.id.in_(
                         select(Mandate.workspace_id).where(
                             Mandate.authorization_id.is_not(None)
+                        )
+                    )
+                    | Workspace.id.in_(
+                        select(LedgerEntry.workspace_id).where(
+                            LedgerEntry.account.like("publisher:%:payable")
                         )
                     )
                 )

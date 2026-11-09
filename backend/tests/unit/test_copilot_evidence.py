@@ -1,7 +1,12 @@
 from uuid import uuid4
 
 from backend.app.agents.anomaly import volume_signal
-from backend.app.agents.copilot_tools import earnings, ledger_activity, mandate_breakdown, overview
+from backend.app.agents.copilot_tools import (
+    earnings,
+    ledger_activity,
+    mandate_breakdown,
+    overview,
+)
 from backend.app.db import init_db, session_scope
 from backend.app.models import Consumer, Mandate, Workspace
 
@@ -12,11 +17,15 @@ def test_new_workspace_evidence_and_scoped_mandate(tmp_path):
         first, second = [Workspace(cookie_id=uuid4().hex) for _ in range(2)]
         db.add_all([first, second])
         db.flush()
-        owner = Consumer(workspace_id=first.id, name="Unit test", salt_hex=uuid4().hex[:8])
+        owner = Consumer(
+            workspace_id=first.id, name="Unit test", salt_hex=uuid4().hex[:8]
+        )
         db.add(owner)
         db.flush()
         # The local draft has no remote order, authorization, captures or payment IDs.
-        mandate = Mandate(workspace_id=first.id, consumer_id=owner.id, cap_micros=5_000_000)
+        mandate = Mandate(
+            workspace_id=first.id, consumer_id=owner.id, cap_micros=5_000_000
+        )
         db.add(mandate)
         db.flush()
     with session_scope(engine, write=False) as db:
@@ -44,21 +53,38 @@ def test_same_payer_suppresses_only_its_layer_on_a_real_gpu_trace():
     trace = load("rate-limit", True)["turns"][0]
     spans = [Span(**span) for span in trace["spans"]]
     fit = calibration()["fit"]
-    evidence = dict(spans=spans, cached_tokens=trace["cached_tokens"], output_tokens=trace["output_tokens"],
-                    alpha=fit["alpha"], beta=fit["beta"])
+    evidence = dict(
+        spans=spans,
+        cached_tokens=trace["cached_tokens"],
+        output_tokens=trace["output_tokens"],
+        alpha=fit["alpha"],
+        beta=fit["beta"],
+    )
     # These are ephemeral principals for an identity equality test. No provider IDs
     # or transactions are created, inserted in the database, or returned as results.
     principal, other = uuid4().hex, uuid4().hex
-    mailbox = uuid4().hex  # Compare canonicalized strings without constructing a recipient address.
-    pubs = {"starlette": Publisher(paypal_receiver_email=mailbox.upper()),
-            "fastapi": Publisher(linked_payer_id=other)}
-    owners = same_payer_layers({"payer_id": principal, "email_digest": receiver_digest(mailbox)}, pubs)
+    mailbox = (
+        uuid4().hex
+    )  # Compare canonicalized strings without constructing a recipient address.
+    pubs = {
+        "starlette": Publisher(paypal_receiver_email=mailbox.upper()),
+        "fastapi": Publisher(linked_payer_id=other),
+    }
+    owners = same_payer_layers(
+        {"payer_id": principal, "email_digest": receiver_digest(mailbox)}, pubs
+    )
     normal = price_call(**evidence)
     suppressed = price_call(**evidence, self_publishers=owners)
     assert owners == {"starlette"}
     assert suppressed.charge_micros == normal.charge_micros
-    assert normal.royalty_micros["starlette"] > 0 and suppressed.royalty_micros["starlette"] == 0
+    assert (
+        normal.royalty_micros["starlette"] > 0
+        and suppressed.royalty_micros["starlette"] == 0
+    )
     assert suppressed.royalty_micros["fastapi"] == normal.royalty_micros["fastapi"] > 0
-    assert suppressed.platform_micros - normal.platform_micros == normal.royalty_micros["starlette"]
+    assert (
+        suppressed.platform_micros - normal.platform_micros
+        == normal.royalty_micros["starlette"]
+    )
     assert same_payer_layers({"payer_id": other}, pubs) == {"fastapi"}
     assert same_payer_layers({"payer_id": None}, pubs) == set()

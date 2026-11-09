@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
-from backend.app import ledger
+from backend.app import ledger, marketplace
 from backend.app.agents.anomaly import payer_key, same_payer_layers
 from backend.app.agents.inference import live_turns
 from backend.app.agents.tasks import TASKS, STEPS
@@ -25,7 +25,6 @@ from backend.app.models import (
     AgentRun,
     Call,
     Consumer,
-    Context,
     Mandate,
     Publisher,
     utcnow,
@@ -215,6 +214,7 @@ def persist(ws, run_id, mid, owners, meter, fit, rates):
         db.add(c)
         db.flush()
         ledger.accrue_call(db, c)
+        marketplace.record_usage(db, c, run.quote_json.get("context_ids"))
         m.last_activity_at = utcnow()
         payload = {
             k: getattr(c, k)
@@ -246,7 +246,7 @@ def execute(ws, identifier, context_id, tenant):
         with slots:
             with session_scope() as db:
                 r = owned(db, AgentRun, identifier, ws)
-                ctx = owned(db, Context, context_id, ws)
+                ctx = marketplace.visible_context(db, context_id, ws)
                 layers = chain(db, ctx)
                 source_chain = [
                     (c.slug, c.token_len, c.token_hash, c.version, c.tokenizer)
@@ -332,7 +332,7 @@ def execute(ws, identifier, context_id, tenant):
                         and c.cached_tokens
                         < sum(len(ids) for _, ids in prefix.layers) * 0.95
                     ):
-                        warm(ctx.id, ws)
+                        warm(ctx.id, ctx.workspace_id)
             finally:
                 if engine is not None:
                     engine.close()
@@ -376,7 +376,7 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
         raise HTTPException(503, "Inference is unavailable")
     with session_scope() as db:
         m = owned(db, Mandate, body.mandate_id, ws)
-        ctx = owned(db, Context, body.context_id, ws)
+        ctx = marketplace.visible_context(db, body.context_id, ws)
         if m.status != "ACTIVE" or not m.authorization_id:
             raise HTTPException(409, "A sandbox-authorized mandate is required")
         if m.expires_at and m.expires_at <= utcnow():
@@ -419,6 +419,7 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
                 request_quote=q,
             )
         q["chain"] = [c.slug for c in layers]
+        q["context_ids"] = [c.id for c in layers]
         r = AgentRun(
             workspace_id=ws,
             mandate_id=m.id,

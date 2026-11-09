@@ -2,13 +2,14 @@ from threading import Event, Lock, Thread
 from datetime import datetime, timezone
 from decimal import Decimal
 from email.utils import parseaddr
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from backend.app import marketplace
 from backend.app.api.access import admin, current_workspace, owned
 from backend.app.config import calibration, manifest, sources, value
 from backend.app.db import session_scope
-from backend.app.models import Call, Context, Publisher
+from backend.app.models import Context, Publisher
 from backend.app.gateway.prompt_builder import Prefix
 from backend.app.gateway.quote import quote
 from backend.app.gateway.sglang_client import Engine
@@ -97,32 +98,23 @@ def publish_owner(body: PublisherInput, ws=wsdep):
         return {"id": obj.id, "name": obj.name}
 
 
+def viewer(cachet_workspace: str | None = Cookie(default=None)):
+    return current_workspace(cachet_workspace) if cachet_workspace else None
+
+
 def chain(db, ctx):
-    return (chain(db, db.get(Context, ctx.parent_id)) if ctx.parent_id else []) + [ctx]
+    parent = marketplace.parent_id(db, ctx)
+    return (chain(db, db.get(Context, parent)) if parent else []) + [ctx]
 
 
-def view(db, c, calls=None):
-    # A context is uniquely published in the workspace. Use the call's actual span
-    # boundary for that layer even when a publisher owns more than one layer.
-    if calls is None:
-        calls = db.scalars(
-            select(Call).where(Call.workspace_id == c.workspace_id)
-        ).all()
-    hits = royalties = 0
-    for call in calls:
-        for s in call.spans_json:
-            if s.get("slug") == c.slug:
-                hits += max(0, min(call.cached_tokens, s["end"]) - s["start"])
-                royalties += (
-                    (call.royalty_json or {}).get(c.publisher_id, 0)
-                    if s.get("royalty_micros") is None
-                    else s["royalty_micros"]
-                )
+def view(db, c, workspace_id):
+    hits, royalties, _ = marketplace.totals(db, c.id)
     return {
         "id": c.id,
         "title": c.title,
         "slug": c.slug,
-        "parent_id": c.parent_id,
+        "parent_id": marketplace.parent_id(db, c),
+        "can_manage": c.workspace_id == workspace_id,
         "publisher_id": c.publisher_id,
         "publisher_name": db.get(Publisher, c.publisher_id).name,
         "status": c.status,
@@ -162,7 +154,11 @@ def publish(body: PublishInput, bg: BackgroundTasks, ws=wsdep):
         raise HTTPException(422, "Unknown licensed source")
     with session_scope() as db:
         pub = owned(db, Publisher, body.publisher_id, ws)
-        parent = owned(db, Context, body.parent_id, ws) if body.parent_id else None
+        parent = (
+            marketplace.visible_context(db, body.parent_id, ws)
+            if body.parent_id
+            else None
+        )
         if (parent.slug if parent else None) != row["parent"]:
             raise HTTPException(422, "Select the published parent layer")
         c = db.scalar(
@@ -173,12 +169,13 @@ def publish(body: PublishInput, bg: BackgroundTasks, ws=wsdep):
         if c:
             if c.publisher_id != pub.id:
                 raise HTTPException(409, "This workspace already published the source")
-            return view(db, c)
+            marketplace.publish(db, c, parent)
+            return view(db, c, ws)
         project = manifest()["projects"][row["slug"]]
         c = Context(
             workspace_id=ws,
             publisher_id=pub.id,
-            parent_id=body.parent_id,
+            parent_id=parent.id if parent and parent.workspace_id == ws else None,
             slug=row["slug"],
             title=row["slug"].capitalize(),
             source_url=project["source_url"],
@@ -192,24 +189,23 @@ def publish(body: PublishInput, bg: BackgroundTasks, ws=wsdep):
         )
         db.add(c)
         db.flush()
+        marketplace.publish(db, c, parent)
         bg.add_task(warm, c.id, ws)
-        return view(db, c, [])
+        return view(db, c, ws)
 
 
 @router.get("/contexts")
-def catalog(ws=wsdep):
+def catalog(ws=Depends(viewer)):
     with session_scope(write=False) as db:
-        calls = db.scalars(select(Call).where(Call.workspace_id == ws)).all()
         return [
-            view(db, c, calls)
-            for c in db.scalars(select(Context).where(Context.workspace_id == ws))
+            view(db, c, ws) for c in db.scalars(marketplace.visible_contexts(db, ws))
         ]
 
 
 @router.get("/contexts/{identifier}")
-def context(identifier: str, ws=wsdep):
+def context(identifier: str, ws=Depends(viewer)):
     with session_scope(write=False) as db:
-        return view(db, owned(db, Context, identifier, ws))
+        return view(db, marketplace.visible_context(db, identifier, ws), ws)
 
 
 @router.post("/contexts/{identifier}/warm")
@@ -218,13 +214,13 @@ def rewarm(identifier: str, bg: BackgroundTasks, ws=wsdep):
         ctx = owned(db, Context, identifier, ws)
         ctx.status = "warming"
         bg.add_task(warm, identifier, ws)
-        return view(db, ctx)
+        return view(db, ctx, ws)
 
 
 @router.post("/quote")
-def quote_context(body: QuoteInput, ws=wsdep):
+def quote_context(body: QuoteInput, ws=Depends(viewer)):
     with session_scope(write=False) as db:
-        ctx = owned(db, Context, body.context_id, ws)
+        ctx = marketplace.visible_context(db, body.context_id, ws)
         return quote(
             sum(x.token_len for x in chain(db, ctx)), body.est_turns, body.cold_fraction
         )

@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
-from ..models import Call, Consumer, Publisher, utcnow
+from ..models import Context, RoyaltyUsage, Consumer, Publisher, utcnow
 from ..operations import Control
 
 
@@ -22,8 +22,14 @@ def receiver_digest(address):
 
 def remember_authorized_payer(db, mandate, order):
     """Bind identity to the exact PayPal order just verified by the authorization service."""
-    if not mandate.paypal_order_id or not mandate.authorization_id or order.get("id") != mandate.paypal_order_id:
-        raise ValueError("Cannot bind a payer without the matching PayPal order and authorization")
+    if (
+        not mandate.paypal_order_id
+        or not mandate.authorization_id
+        or order.get("id") != mandate.paypal_order_id
+    ):
+        raise ValueError(
+            "Cannot bind a payer without the matching PayPal order and authorization"
+        )
     key = payer_key(mandate)
     if db.get(Control, key):
         return
@@ -36,7 +42,9 @@ def remember_authorized_payer(db, mandate, order):
     if payer_id:
         db.get(Consumer, mandate.consumer_id).linked_payer_id = payer_id
         if fingerprint:
-            for publisher in db.scalars(select(Publisher).where(Publisher.workspace_id == mandate.workspace_id)):
+            for publisher in db.scalars(
+                select(Publisher).where(Publisher.workspace_id == mandate.workspace_id)
+            ):
                 if receiver_digest(publisher.paypal_receiver_email) == fingerprint:
                     publisher.linked_payer_id = payer_id
 
@@ -47,9 +55,12 @@ def same_payer_layers(identity, publishers):
     if not payer_id:
         return set()
     fingerprint = identity.get("email_digest")
-    return {slug for slug, p in publishers.items()
-            if payer_id == p.linked_payer_id or
-            (fingerprint and receiver_digest(p.paypal_receiver_email) == fingerprint)}
+    return {
+        slug
+        for slug, p in publishers.items()
+        if payer_id == p.linked_payer_id
+        or (fingerprint and receiver_digest(p.paypal_receiver_email) == fingerprint)
+    }
 
 
 def volume_signal(observed, history):
@@ -66,25 +77,35 @@ def activity(db, workspace_id, now=None):
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elapsed = now - today
     start = today - timedelta(days=7)
-    publishers = list(db.scalars(select(Publisher).where(Publisher.workspace_id == workspace_id)))
+    publishers = list(
+        db.scalars(select(Publisher).where(Publisher.workspace_id == workspace_id))
+    )
     counts = {p.id: [0] * 8 for p in publishers}
     self_hits = {p.id: 0 for p in publishers}
-    calls = db.scalars(select(Call).where(Call.workspace_id == workspace_id, Call.created_at.between(start, now)))
-    for call in calls:
-        day = (call.created_at - start).days
-        if call.created_at - (start + timedelta(days=day)) > elapsed:
-            continue
-        for span in call.spans_json:
-            if span["kind"] == "publisher" and span["owner"] in counts:
-                hits = max(0, min(span["end"], call.cached_tokens) - span["start"])
-                counts[span["owner"]][day] += hits
-                if day == 7 and span.get("self_royalty_suppressed"):
-                    self_hits[span["owner"]] += hits
+    rows = db.execute(
+        select(RoyaltyUsage, Context.publisher_id)
+        .join(Context, Context.id == RoyaltyUsage.context_id)
+        .where(
+            Context.workspace_id == workspace_id,
+            RoyaltyUsage.measured_at.between(start, now),
+        )
+    )
+    for usage, publisher_id in rows:
+        day = (usage.measured_at - start).days
+        if usage.measured_at - (start + timedelta(days=day)) <= elapsed:
+            counts[publisher_id][day] += usage.hits
+            if day == 7 and usage.self_use:
+                self_hits[publisher_id] += usage.hits
     return [
         {
-            "publisher_id": p.id, "name": p.name, "today_hits": counts[p.id][-1],
-            "reference_hits": counts[p.id][:-1], "self_use_hits": self_hits[p.id],
-            "z_score": volume_signal(counts[p.id][-1], counts[p.id][:-1]) if p.created_at <= start else None,
+            "publisher_id": p.id,
+            "name": p.name,
+            "today_hits": counts[p.id][-1],
+            "reference_hits": counts[p.id][:-1],
+            "self_use_hits": self_hits[p.id],
+            "z_score": volume_signal(counts[p.id][-1], counts[p.id][:-1])
+            if p.created_at <= start
+            else None,
         }
         for p in publishers
     ]

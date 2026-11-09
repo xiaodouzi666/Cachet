@@ -4,8 +4,18 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    JSON, Boolean, CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint,
-    Index, Integer, String, Text, UniqueConstraint,
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
@@ -48,7 +58,9 @@ class ScopedEntity(Entity):
 
 
 def scoped_fk(column, table):
-    return ForeignKeyConstraint([column, "workspace_id"], [f"{table}.id", f"{table}.workspace_id"])
+    return ForeignKeyConstraint(
+        [column, "workspace_id"], [f"{table}.id", f"{table}.workspace_id"]
+    )
 
 
 class Workspace(Entity, Base):
@@ -68,8 +80,10 @@ class Publisher(ScopedEntity, Base):
 class Context(ScopedEntity, Base):
     __tablename__ = "context"
     __table_args__ = (
-        UniqueConstraint("id", "workspace_id"), UniqueConstraint("workspace_id", "slug"),
-        scoped_fk("parent_id", "context"), scoped_fk("publisher_id", "publisher"),
+        UniqueConstraint("id", "workspace_id"),
+        UniqueConstraint("workspace_id", "slug"),
+        scoped_fk("parent_id", "context"),
+        scoped_fk("publisher_id", "publisher"),
         CheckConstraint("token_len >= 0"),
     )
     publisher_id: Mapped[str]
@@ -99,10 +113,15 @@ class Consumer(ScopedEntity, Base):
 class Mandate(ScopedEntity, Base):
     __tablename__ = "mandate"
     __table_args__ = (
-        UniqueConstraint("id", "workspace_id"), scoped_fk("consumer_id", "consumer"),
-        CheckConstraint("cap_micros > 0 AND cap_micros % 10000 = 0 AND cap_micros <= 20000000"),
-        CheckConstraint("captured_micros >= 0 AND accrued_uncaptured_micros >= 0 AND "
-                        "captured_micros + accrued_uncaptured_micros <= cap_micros"),
+        UniqueConstraint("id", "workspace_id"),
+        scoped_fk("consumer_id", "consumer"),
+        CheckConstraint(
+            "cap_micros > 0 AND cap_micros % 10000 = 0 AND cap_micros <= 20000000"
+        ),
+        CheckConstraint(
+            "captured_micros >= 0 AND accrued_uncaptured_micros >= 0 AND "
+            "captured_micros + accrued_uncaptured_micros <= cap_micros"
+        ),
         CheckConstraint("refunded_micros >= 0 AND refunded_micros <= captured_micros"),
     )
     consumer_id: Mapped[str] = mapped_column(index=True)
@@ -121,7 +140,10 @@ class Mandate(ScopedEntity, Base):
 
 class AgentRun(ScopedEntity, Base):
     __tablename__ = "agent_run"
-    __table_args__ = (UniqueConstraint("id", "workspace_id"), scoped_fk("mandate_id", "mandate"))
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id"),
+        scoped_fk("mandate_id", "mandate"),
+    )
     mandate_id: Mapped[str] = mapped_column(index=True)
     task_id: Mapped[str]
     task_text: Mapped[str] = mapped_column(Text)
@@ -136,9 +158,15 @@ class AgentRun(ScopedEntity, Base):
 class Call(ScopedEntity, Base):
     __tablename__ = "call"
     __table_args__ = (
-        UniqueConstraint("id", "workspace_id"), UniqueConstraint("run_id", "turn"), scoped_fk("run_id", "agent_run"),
-        CheckConstraint("turn >= 0 AND prompt_tokens >= cached_tokens AND cached_tokens >= 0 AND output_tokens >= 0"),
-        CheckConstraint("public_charge_micros >= 0 AND charge_micros >= public_charge_micros AND platform_micros >= 0"),
+        UniqueConstraint("id", "workspace_id"),
+        UniqueConstraint("run_id", "turn"),
+        scoped_fk("run_id", "agent_run"),
+        CheckConstraint(
+            "turn >= 0 AND prompt_tokens >= cached_tokens AND cached_tokens >= 0 AND output_tokens >= 0"
+        ),
+        CheckConstraint(
+            "public_charge_micros >= 0 AND charge_micros >= public_charge_micros AND platform_micros >= 0"
+        ),
     )
     run_id: Mapped[str] = mapped_column(index=True)
     turn: Mapped[int]
@@ -168,7 +196,8 @@ class Call(ScopedEntity, Base):
 class Capture(ScopedEntity, Base):
     __tablename__ = "capture"
     __table_args__ = (
-        UniqueConstraint("id", "workspace_id"), scoped_fk("mandate_id", "mandate"),
+        UniqueConstraint("id", "workspace_id"),
+        scoped_fk("mandate_id", "mandate"),
         CheckConstraint("amount_cents > 0 AND fee_cents >= 0"),
     )
     mandate_id: Mapped[str] = mapped_column(index=True)
@@ -183,10 +212,14 @@ class Capture(ScopedEntity, Base):
 class CaptureAllocation(ScopedEntity, Base):
     __tablename__ = "capture_allocation"
     __table_args__ = (
-        UniqueConstraint("capture_id", "call_id"), scoped_fk("capture_id", "capture"), scoped_fk("call_id", "call"),
+        UniqueConstraint("capture_id", "call_id"),
+        scoped_fk("capture_id", "capture"),
+        scoped_fk("call_id", "call"),
         CheckConstraint("principal_micros >= public_micros AND public_micros >= 0"),
-        CheckConstraint("refunded_micros >= refunded_public_micros AND refunded_public_micros >= 0 AND "
-                        "refunded_micros <= principal_micros AND refunded_public_micros <= public_micros"),
+        CheckConstraint(
+            "refunded_micros >= refunded_public_micros AND refunded_public_micros >= 0 AND "
+            "refunded_micros <= principal_micros AND refunded_public_micros <= public_micros"
+        ),
     )
     capture_id: Mapped[str] = mapped_column(index=True)
     call_id: Mapped[str] = mapped_column(index=True)
@@ -200,8 +233,11 @@ class CaptureAllocation(ScopedEntity, Base):
 
 class Refund(ScopedEntity, Base):
     __tablename__ = "refund"
-    __table_args__ = (UniqueConstraint("id", "workspace_id"), scoped_fk("capture_id", "capture"),
-                      CheckConstraint("amount_cents > 0 AND fee_reversal_cents >= 0"))
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id"),
+        scoped_fk("capture_id", "capture"),
+        CheckConstraint("amount_cents > 0 AND fee_reversal_cents >= 0"),
+    )
     capture_id: Mapped[str] = mapped_column(index=True)
     paypal_refund_id: Mapped[str | None] = mapped_column(unique=True)
     amount_cents: Mapped[int]
@@ -213,7 +249,10 @@ class Refund(ScopedEntity, Base):
 
 class PayoutBatch(ScopedEntity, Base):
     __tablename__ = "payout_batch"
-    __table_args__ = (UniqueConstraint("id", "workspace_id"), CheckConstraint("fee_cents >= 0"))
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id"),
+        CheckConstraint("fee_cents >= 0"),
+    )
     sender_batch_id: Mapped[str] = mapped_column(unique=True)
     paypal_batch_id: Mapped[str | None] = mapped_column(unique=True)
     status: Mapped[str]
@@ -223,8 +262,10 @@ class PayoutBatch(ScopedEntity, Base):
 class PayoutItem(ScopedEntity, Base):
     __tablename__ = "payout_item"
     __table_args__ = (
-        UniqueConstraint("batch_id", "publisher_id"), scoped_fk("batch_id", "payout_batch"),
-        scoped_fk("publisher_id", "publisher"), CheckConstraint("amount_cents > 0 AND fee_cents >= 0"),
+        UniqueConstraint("batch_id", "publisher_id"),
+        scoped_fk("batch_id", "payout_batch"),
+        scoped_fk("publisher_id", "publisher"),
+        CheckConstraint("amount_cents > 0 AND fee_cents >= 0"),
     )
     batch_id: Mapped[str] = mapped_column(index=True)
     publisher_id: Mapped[str] = mapped_column(index=True)
@@ -236,7 +277,10 @@ class PayoutItem(ScopedEntity, Base):
 
 class LedgerTxn(ScopedEntity, Base):
     __tablename__ = "ledger_txn"
-    __table_args__ = (UniqueConstraint("id", "workspace_id"), UniqueConstraint("ref_type", "ref_id"))
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id"),
+        UniqueConstraint("ref_type", "ref_id"),
+    )
     ref_type: Mapped[str]
     ref_id: Mapped[str]
 
@@ -244,8 +288,11 @@ class LedgerTxn(ScopedEntity, Base):
 class LedgerEntry(ScopedEntity, Base):
     __tablename__ = "ledger_entry"
     __table_args__ = (
-        UniqueConstraint("txn_id", "account"), scoped_fk("txn_id", "ledger_txn"),
-        CheckConstraint("(debit_micros > 0 AND credit_micros = 0) OR (credit_micros > 0 AND debit_micros = 0)"),
+        UniqueConstraint("txn_id", "account"),
+        scoped_fk("txn_id", "ledger_txn"),
+        CheckConstraint(
+            "(debit_micros > 0 AND credit_micros = 0) OR (credit_micros > 0 AND debit_micros = 0)"
+        ),
     )
     txn_id: Mapped[str] = mapped_column(index=True)
     account: Mapped[str] = mapped_column(index=True)
@@ -275,3 +322,30 @@ class BenchResult(Entity, Base):
     cold_ttft_ms_p50: Mapped[float]
     warm_ttft_ms_p50: Mapped[float]
     runs_json: Mapped[list] = mapped_column(JSON)
+
+
+class MarketListing(Base):
+    """A normal workspace publishes a specific immutable owner and parent chain."""
+
+    __tablename__ = "market_listing"
+    context_id: Mapped[str] = mapped_column(ForeignKey("context.id"), primary_key=True)
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("market_listing.context_id")
+    )
+
+
+class RoyaltyUsage(Base):
+    """Private link to the originating call, public aggregate measures per canonical listing."""
+
+    __tablename__ = "royalty_usage"
+    __table_args__ = (
+        CheckConstraint("hits >= 0 AND gross_micros >= 0 AND linear_micros >= 0"),
+        Index("ix_royalty_usage_context_time", "context_id", "measured_at"),
+    )
+    context_id: Mapped[str] = mapped_column(ForeignKey("context.id"), primary_key=True)
+    call_id: Mapped[str] = mapped_column(ForeignKey("call.id"), primary_key=True)
+    hits: Mapped[int]
+    gross_micros: Mapped[int]
+    linear_micros: Mapped[int]
+    self_use: Mapped[bool]
+    measured_at: Mapped[datetime] = mapped_column(UTCDateTime())

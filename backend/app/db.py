@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from backend.migrations import v001_initial
+from backend.migrations import v001_initial, v002_marketplace
 
 
 @lru_cache(maxsize=8)
@@ -20,7 +20,9 @@ def engine_for(url: str):
         raise ValueError("Cachet requires a SQLite database")
     if parsed.database not in (None, "", ":memory:"):
         Path(parsed.database).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
+    engine = create_engine(
+        url, connect_args={"check_same_thread": False, "timeout": 30}
+    )
 
     @event.listens_for(engine, "connect")
     def configure(dbapi_connection, _record):
@@ -32,8 +34,11 @@ def engine_for(url: str):
 
 def configured_url():
     root = Path(__file__).resolve().parents[2]
-    return (os.environ.get("DATABASE_URL") or dotenv_values(root / ".env").get("DATABASE_URL")
-            or f"sqlite:///{root / '.cache' / 'cachet.db'}")
+    return (
+        os.environ.get("DATABASE_URL")
+        or dotenv_values(root / ".env").get("DATABASE_URL")
+        or f"sqlite:///{root / '.cache' / 'cachet.db'}"
+    )
 
 
 @lru_cache(maxsize=8)
@@ -49,10 +54,15 @@ def _migrate(url):
             version = conn.exec_driver_sql("PRAGMA user_version").scalar_one()
             if version == 0:
                 if inspect(conn).get_table_names():
-                    raise RuntimeError("Refusing to adopt an unversioned nonempty database")
+                    raise RuntimeError(
+                        "Refusing to adopt an unversioned nonempty database"
+                    )
                 v001_initial.upgrade(conn)
-                conn.exec_driver_sql("PRAGMA user_version=1")
-            elif version != 1:
+                version = 1
+            if version == 1:
+                v002_marketplace.upgrade(conn)
+                conn.exec_driver_sql("PRAGMA user_version=2")
+            elif version != 2:
                 raise RuntimeError(f"Unsupported database schema version {version}")
             conn.commit()
         except Exception:
@@ -68,7 +78,9 @@ def init_db(url=None):
 @contextmanager
 def session_scope(engine=None, *, write=True):
     """A short transaction. Keep external calls outside this context."""
-    with Session(engine if engine is not None else init_db(), expire_on_commit=False) as session:
+    with Session(
+        engine if engine is not None else init_db(), expire_on_commit=False
+    ) as session:
         # Explicit BEGIN gives read transactions a stable snapshot. IMMEDIATE serializes
         # writers before checking balances or obtaining an idempotency decision.
         session.connection().exec_driver_sql("BEGIN IMMEDIATE" if write else "BEGIN")
@@ -76,6 +88,7 @@ def session_scope(engine=None, *, write=True):
             yield session
             if write:
                 from .ledger import assert_invariants
+
                 assert_invariants(session)
                 session.commit()
             else:

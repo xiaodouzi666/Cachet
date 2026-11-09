@@ -10,6 +10,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from backend.app import marketplace
 from backend.app.api.access import (
     admin,
     client_ip,
@@ -140,9 +141,13 @@ def state(ws=wsdep):
         sandbox = value("PAYPAL_ENV", "sandbox") == "sandbox"
         buyer = sandbox and kind == "judge"
         provenance = seed.seed_state(db, ws)
-        latest_run = fields(run, "id mandate_id task_id status mode quote_json") if run else None
+        latest_run = (
+            fields(run, "id mandate_id task_id status mode quote_json") if run else None
+        )
         if latest_run:
-            latest_run["operator_seeded"] = run.id in provenance["operator_seed_run_ids"]
+            latest_run["operator_seeded"] = (
+                run.id in provenance["operator_seed_run_ids"]
+            )
         return {
             **provenance,
             "workspace_id": ws,
@@ -342,21 +347,22 @@ def payouts(ws=wsdep):
 @router.get("/royalties")
 def royalties(ws=wsdep):
     with session_scope(write=False) as db:
-        calls = list(db.scalars(select(Call).where(Call.workspace_id == ws)))
         result = []
-        for c in db.scalars(select(Context).where(Context.workspace_id == ws)):
-            spans = [
-                s for call in calls for s in call.spans_json if s.get("slug") == c.slug
-            ]
+        for c in marketplace.settlement_contexts(db, ws):
+            published = c.workspace_id == ws
+            hits, gross, linear = marketplace.totals(
+                db, c.id, buyer=None if published else ws
+            )
             result.append(
                 {
                     "id": c.id,
-                    "parent_id": c.parent_id,
+                    "parent_id": marketplace.parent_id(db, c),
                     "publisher_id": c.publisher_id,
                     "title": c.title,
-                    "hit_tokens": sum(s["hits"] for s in spans),
-                    "linear_micros": sum(s["linear_micros"] for s in spans),
-                    "shapley_micros": sum(s["royalty_micros"] for s in spans),
+                    "scope": "published" if published else "purchased",
+                    "hit_tokens": hits,
+                    "linear_micros": linear,
+                    "shapley_micros": gross,
                 }
             )
         return result
