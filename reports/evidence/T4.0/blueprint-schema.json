@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-11-09T06:23:12.929736+00:00",
+  "source": "https://render.com/schema/render.yaml.json",
+  "schema_sha256": "8a3fb8da6b4f55fe686fbefa790e011d3dd7895f013f355953c572a21ab6494a",
+  "blueprint_sha256": "fc46251c3223ac8e3fde1a5c51431e4b100010529caee99d2f1c39578b807cc0",
+  "valid": true,
+  "validated_services": [
+    "cachet-api",
+    "cachet-web"
+  ],
+  "validation": "YAML parse and official JSON Schema validation",
+  "render_workspace_validation": "Requires a Render workspace; not executed."
+}

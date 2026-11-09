@@ -1,0 +1,81 @@
+{
+  "tested_at": "2026-11-09T06:25:45.355146+00:00",
+  "commit": "8c020dd570d094efdb565277955743d459a2f2bf",
+  "environment": "Disposable Debian container, fresh package caches, no GPU devices or PayPal app credentials",
+  "initial_checkout": {
+    ".env": "absent",
+    ".data/cachet.db": "absent",
+    ".venv": "absent",
+    "frontend/node_modules": "absent",
+    "frontend/.next": "absent",
+    "AGENTS.md": "absent",
+    "docs/internal": "absent"
+  },
+  "steps": [
+    {
+      "name": "setup",
+      "seconds": 300.52,
+      "exit": 0
+    },
+    {
+      "name": "dev",
+      "seconds": 6.88,
+      "exit": 0
+    },
+    {
+      "name": "stop-private-api",
+      "seconds": 0.0,
+      "exit": 0
+    },
+    {
+      "name": "restart",
+      "seconds": 3.01,
+      "exit": 0
+    },
+    {
+      "name": "verify",
+      "seconds": 2.63,
+      "exit": 0,
+      "summary": [
+        "43 passed, 7 skipped, 4 deselected, 1 warning in 1.56s"
+      ]
+    },
+    {
+      "name": "stop-private-services",
+      "seconds": 0.0,
+      "exit": 0
+    },
+    {
+      "name": "web-production-build",
+      "seconds": 30.18,
+      "exit": 0
+    }
+  ],
+  "versions": {
+    "python3.11": "Python 3.11.15",
+    "node": "v22.23.4",
+    "npm": "10.9.9",
+    "tmux": "tmux 3.5a"
+  },
+  "health": {
+    "service": "cachet-api",
+    "version": "0.2.0",
+    "mode": "replay",
+    "paypal_configured": false,
+    "sglang": "offline",
+    "model": null
+  },
+  "http_status": {
+    "/": 200,
+    "/judge": 200,
+    "/catalog": 200,
+    "/publish": 200,
+    "/agent": 200,
+    "/settlement": 200
+  },
+  "operator_route_via_public_bff": 404,
+  "readme_ready_seconds": 321.49,
+  "workspace_persisted_after_restart": true,
+  "total_seconds": 357.42,
+  "passed": true
+}
