@@ -58,6 +58,22 @@ class Demo:
         return response.json()
 
     def connect(self, api_url):
+        check(self.data.setdefault("origin", api_url) == api_url, "Resume this workspace on its original backend.")
+        if self.data.get("workspace_cookie"):
+            self.api.cookies.set("cachet_workspace", self.data["workspace_cookie"])
+            state = self.call("GET", "/judge/state")
+            check(self.data["workspace_id"] == state["workspace_id"] and state["kind"] == "judge",
+                  "The journal's original judge workspace is required.")
+            # An interrupted GPU must not prevent closing an existing sandbox authorization.
+            active = next((s for s in self.sessions if not s.get("finished")), None)
+            last = state.get("run")
+            if active and active.get("failure"):
+                self.close_failed_run(active)
+            if (active and last and last["status"] == "failed" and active.get("mandate_id") == last["mandate_id"]
+                    and last["id"] == active.get("run_id", last["id"])):
+                active["run_id"] = last["id"]
+                active.setdefault("accepted_at", time.time())
+                self.session_turns(active)
         health = self.call("GET", "/health")
         check(health.get("service") == "cachet-api" and health.get("mode") == self.mode and health.get("gpu"),
               f"Expected Cachet inference mode {self.mode}. Review /api/health.")
@@ -69,13 +85,8 @@ class Demo:
             check(health.get("card_enabled"), "The backend has no fixed sandbox test card configured.")
         emails = [require(self.cfg, f"PUBLISHER_{slug.upper()}_EMAIL") for slug in SOURCES]
         check(len(set(x.casefold() for x in emails)) == len(SOURCES), "Provide two distinct publisher recipients.")
-        check(self.data.setdefault("origin", api_url) == api_url, "Resume this workspace on its original backend.")
         self.pp.access_token()
-        if self.data.get("workspace_cookie"):
-            self.api.cookies.set("cachet_workspace", self.data["workspace_cookie"])
-            state = self.call("GET", "/judge/state")
-            check(self.data["workspace_id"] == state["workspace_id"], "Workspace identity changed.")
-        else:
+        if not self.data.get("workspace_cookie"):
             state = self.call("POST", "/judge/workspace", {"kind":"judge"})
             self.data.update(workspace_id=state["workspace_id"], workspace_cookie=self.api.cookies["cachet_workspace"])
             self.journal.save()
@@ -138,7 +149,7 @@ class Demo:
                     continue
                 payload = json.loads(line.partition(":")[2].strip())
                 if event == "error":
-                    raise RuntimeError(f"Agent run {run_id} failed. Inspect the backend before resuming.")
+                    raise FailedRun(payload["message"], rows)
                 if event == "queued":
                     mode = payload["mode"]
                 elif event == "decision":
@@ -156,11 +167,45 @@ class Demo:
               "Real metering must attribute positive royalties to each published layer.")
         return rows
 
+    def session_turns(self, s):
+        try:
+            return self.turns(s["run_id"])
+        except FailedRun as exc:
+            s.update(failure={"at":now(), "reason":str(exc)}, turns=exc.rows)
+            suite = self.data.get("acceptance_suite")
+            if s["purpose"] == "acceptance" and suite and not suite.get("completed"):
+                suite["initial"] = sum(1 for attempt in self.sessions if attempt.get("accepted"))
+            self.journal.save()
+        self.close_failed_run(s)
+
+    def close_failed_run(self, s):
+        mid = s["mandate_id"]
+        mandate = self.call("GET", f"/mandates/{mid}")
+        auth = mandate.get("authorization_id")
+        check(auth and auth == s.get("authorization_id", auth) and mandate["paypal_order_id"] == s["order_id"],
+              f"Inspect mandate {mid}: its sandbox order or authorization differs from this journal.")
+        s["authorization_id"] = auth
+        self.journal.save()
+        # Audit committed calls first so uncaptured SLA reversals are applied before final collection.
+        s["audit"] = self.call("POST", "/judge/audit", {"mandate_id":mid})
+        closed = self.call("POST", f"/mandates/{mid}/close")
+        check(closed["status"] in SETTLED and closed["authorization_id"] == auth,
+              f"Inspect mandate {mid}: its sandbox authorization has not reached a verified terminal state.")
+        s["closed"] = closed
+        self.journal.save()
+        s["reconciliation"] = self.reconcile()
+        s["finished"] = now()
+        self.journal.save()
+        raise RuntimeError(f"Run {s['run_id']} failed. Mandate {mid} is {closed['status']} and reconciled. "
+                           "Resolve the run error and rerun with the same journal to start another attempt.")
+
     def session(self, purpose):
         active = next((s for s in self.sessions if not s.get("finished")), None)
         if active is not None:
             check(active["purpose"] == purpose, f"First resume the unfinished {active['purpose']} session.")
             s = active
+            if s.get("failure"):
+                self.close_failed_run(s)
         else:
             s = {"purpose":purpose, "started":now(), "payable_before":self.payable()}
             self.sessions.append(s)
@@ -182,6 +227,7 @@ class Demo:
             mandate = self.call("POST", f"/mandates/{mid}/authorize")
         check(mandate["authorization_id"], "A real sandbox authorization is required.")
         s["authorization_id"] = mandate["authorization_id"]
+        self.journal.save()
         if purpose == "seed" and not s.get("seed_reserved"):
             reserved = self.call("POST", f"/operator/seed-mandates/{mid}")
             check(reserved["reserved_mandate_id"] == mid, "Seed reservation refers to a different mandate.")
@@ -209,7 +255,7 @@ class Demo:
                     raise exc
                 s.update(run_id=run["run_id"], accepted_at=time.time())
             self.journal.save()
-        rows = self.turns(s["run_id"])
+        rows = self.session_turns(s)
         faults = [r for r in rows if r["fault_injected_ms"]]
         if purpose == "acceptance":
             check(len(faults) == 3 and all(r["sla_breach"] and r["ttft_ms"] >= 1200 for r in faults),
@@ -297,7 +343,7 @@ class Demo:
             self.journal.save()
         check(repeats == suite["repeats"], "Resume the suite using its original repeat count.")
         while accepted() < suite["initial"] + repeats:
-            unfinished = next((s for s in self.sessions if s["purpose"] == "acceptance" and not s.get("accepted")), None)
+            unfinished = pending_acceptance(self.sessions)
             if unfinished is None:
                 minimum = max(10000, int(Decimal(self.cfg.get("JUDGE_PAYOUT_MIN_USD") or ".01") * 1000000))
                 if any(s["purpose"] == "preparation" and not s.get("finished") for s in self.sessions):
@@ -313,6 +359,17 @@ class Demo:
             self.settlement(unfinished)
         suite["completed"] = now()
         self.journal.save()
+
+
+def pending_acceptance(sessions):
+    return next((s for s in sessions if s["purpose"] == "acceptance" and not s.get("accepted")
+                 and not (s.get("failure") and s.get("finished"))), None)
+
+
+class FailedRun(RuntimeError):
+    def __init__(self, message, rows):
+        self.rows = rows
+        super().__init__(message)
 
 
 class RateLimit(RuntimeError):
