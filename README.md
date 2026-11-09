@@ -17,7 +17,7 @@ make dev
 
 Open [the judge guide](http://127.0.0.1:3000/judge). Choose **Start guided demo** to create an isolated workspace. The catalog and settlement pages show the records in the current workspace. Keys belong in the private project `.env`. Setup generates a gateway token, keeps existing configuration and creates the local database on first startup. The API is available at [loopback health](http://127.0.0.1:8000/api/health).
 
-For sandbox transactions, configure a PayPal sandbox app with Payouts access, a demo sandbox buyer, and two distinct sandbox receiver accounts. Set the `PAYPAL_*`, `JUDGE_BUYER_*` and `PUBLISHER_*_EMAIL` fields in `.env`. Judge mode then displays the configured sandbox buyer during checkout. Only set the optional fixed test-card fields for a supported sandbox card. Ordinary workspaces supply their own receivers. A PayPal login, mandate ID or payment receipt is never generated locally.
+For sandbox transactions, configure a PayPal sandbox app with Payouts access, a demo sandbox buyer, and two distinct sandbox receiver accounts. Set the `PAYPAL_*`, `JUDGE_BUYER_*` and `PUBLISHER_*_EMAIL` fields in `.env`. Judge mode then displays the configured sandbox buyer during checkout. Only set the optional fixed test-card fields for a supported sandbox card. Ordinary workspaces supply their own receivers. The two sandbox publishers in the walkthrough are test roles using licensed framework excerpts. A PayPal login, mandate ID or payment receipt is never generated locally.
 
 For live inference on Linux, use a compatible NVIDIA GPU, CUDA toolkit and `uv`. Generate a separate random `SGLANG_API_KEY` in the project `.env`, install the pinned model and start the authenticated tmux service:
 
@@ -26,7 +26,7 @@ scripts/start_sglang.sh --install
 scripts/start_sglang.sh
 ```
 
-For Ops Copilot's PayPal read tools, run `.venv/bin/python scripts/toolkit_probe.py install`. The toolkit runs in a separate Python environment. Copilot uses the local model, or the configured OpenAI-compatible endpoint. Transaction history is visible only for provider IDs in the current workspace. Sandbox Reporting can lag behind the Payments API.
+For Ops Copilot's PayPal read tools, run `.venv/bin/python scripts/toolkit_probe.py install`. The toolkit runs in a separate Python environment. Copilot uses the local model, or the configured OpenAI-compatible endpoint. Transaction history is visible only for provider IDs in the current workspace. Sandbox Reporting can lag behind the Payments API. Sandbox Copilot exposes order lookup and transaction search. The Toolkit merchant-insights endpoint requires a supported merchant environment.
 
 ## From a prompt to a payout
 
@@ -45,6 +45,16 @@ flowchart LR
   API --> PP[PayPal Sandbox]
   PP -->|Signed webhook| API
   API --> Ops[Ops Copilot and scoped toolkit]
+```
+
+```mermaid
+flowchart LR
+  Auth[Buyer authorization] -->|Metered whole cents| Cap[Capture]
+  Cap --> Clearing[PayPal clearing]
+  Cap -->|Confirmed funding| Eligible[Publisher royalties eligible for payout]
+  Eligible --> Batch[Recipient payout batch]
+  Clearing -->|Captured public charge under SLA| Refund[Buyer refund]
+  Auth -->|Close| Released[Unused authorization released]
 ```
 
 The normal mandate path is `CREATED → APPROVED → AUTHORIZED → ACTIVE`. A partial capture moves through `CAPTURING`. Closing performs the final whole-cent capture when due, checks the provider authorization, releases the remainder and journals rounding dust. The state machine also handles void, expiry and failure. [State machine](backend/app/settlement/mandate_fsm.py) · [Settlement service](backend/app/settlement/service.py)
