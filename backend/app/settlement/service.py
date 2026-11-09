@@ -102,7 +102,7 @@ def view(m):
     } | {
         "mandate_id": m.id,
         "released_micros": m.cap_micros - m.captured_micros
-        if m.status in {"CLOSED", "VOIDED", "EXPIRED"}
+        if m.authorization_id and m.status in {"CLOSED", "VOIDED", "EXPIRED"}
         else 0,
     }
 

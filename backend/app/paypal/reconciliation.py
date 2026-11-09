@@ -1,6 +1,7 @@
 """Reconcile one workspace against GET responses from its sandbox app."""
 
 from collections import defaultdict
+from urllib.parse import urlsplit
 from sqlalchemy import select
 
 from backend.app import ledger
@@ -84,6 +85,7 @@ def orders(pp, report, mandates, captures):
 
 def cash(pp, report, captures, refunds, authorizations, operations):
     paid_back = defaultdict(int)
+    capture_ids = {row.id: row.paypal_capture_id for row in captures}
     for f in refunds:
         remote = report.fetch(f, "refund", f.paypal_refund_id, pp.get_refund)
         if not remote:
@@ -92,6 +94,9 @@ def cash(pp, report, captures, refunds, authorizations, operations):
         fee = (remote.get("seller_payable_breakdown") or {}).get("paypal_fee")
         reversal = abs(cents(fee)) if fee else 0
         report.compare(f.id, "refund ID", f.paypal_refund_id, remote["id"])
+        parent = next((urlsplit(link["href"]).path for link in remote.get("links", []) if link.get("rel") == "up"), None)
+        if parent:
+            report.compare(f.id, "refund capture", "/v2/payments/captures/" + str(capture_ids.get(f.capture_id)), parent)
         report.compare(f.id, "refund amount", f.amount_cents, amount)
         report.compare(f.id, "refund fee reversal", f.fee_reversal_cents, reversal)
         report.compare(f.id, "refund status", f.status, remote["status"])
