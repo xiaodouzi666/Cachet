@@ -37,13 +37,14 @@ def save_report(path, data):
 
 
 class Demo:
-    def __init__(self, journal, api, pp, config, payment):
+    def __init__(self, journal, api, pp, config, payment, mode="live"):
         self.journal = journal
         self.data = journal.data
         self.api = api
         self.pp = pp
         self.cfg = config
         self.payment = payment
+        self.mode = mode
         self.sessions = self.data.setdefault("sessions", [])
         self.publishers = {}
         self.contexts = {}
@@ -58,8 +59,8 @@ class Demo:
 
     def connect(self, api_url):
         health = self.call("GET", "/health")
-        check(health.get("service") == "cachet-api" and health.get("mode") == "live" and health.get("gpu"),
-              "A live Cachet GPU is required. Review /api/health.")
+        check(health.get("service") == "cachet-api" and health.get("mode") == self.mode and health.get("gpu"),
+              f"Expected Cachet inference mode {self.mode}. Review /api/health.")
         check(health.get("paypal_configured") is True, "The backend requires a configured PayPal sandbox app.")
         if self.payment == "wallet":
             for field in ("JUDGE_BUYER_EMAIL", "JUDGE_BUYER_PASSWORD"):
@@ -147,9 +148,9 @@ class Demo:
                                 "ttft_ms", "measured_ttft_ms", "charge_micros", "royalty_json", "fault_injected_ms", "sla_breach", "mode")})
                 elif event == "done":
                     terminal = payload["run_id"] == run_id and payload["status"] == "completed"
-        check(terminal and mode == "live" and decision == "buy", f"No completed live Buy run for {run_id}.")
+        check(terminal and mode == self.mode and decision == "buy", f"No completed live Buy run for {run_id}.")
         check(len(rows) >= 10 and len({r["turn"] for r in rows}) == len(rows) == len({r["id"] for r in rows})
-              and all(r["mode"] == "live" and r["prompt_tokens"] > 0 and r["output_tokens"] > 0 for r in rows),
+              and all(r["mode"] == self.mode and r["prompt_tokens"] > 0 and r["output_tokens"] > 0 for r in rows),
               "Expected at least ten distinct live metered turns.")
         check(all(any(r["royalty_json"].get(p, 0) > 0 for r in rows) for p in self.publishers.values()),
               "Real metering must attribute positive royalties to each published layer.")
@@ -327,7 +328,7 @@ def execute(args, action):
     token = require(config, "ADMIN_TOKEN")
     with PayPalClient(config) as pp, httpx.Client(base_url=url, headers={"X-Admin-Token":token},
                 follow_redirects=False, timeout=httpx.Timeout(240, connect=10)) as api, locked_journal(args.state, "operator-demo") as state:
-        demo = Demo(state, api, pp, config, args.payment)
+        demo = Demo(state, api, pp, config, args.payment, getattr(args, "require_mode", "live"))
         demo.connect(url)
         action(demo)
         summary = {k:state.data[k] for k in ("workspace_id", "health", "warm", "sessions")}
@@ -358,6 +359,7 @@ def smoke(demo):
 
 if __name__ == "__main__":
     parser = arguments(argparse.ArgumentParser(description=__doc__))
+    parser.add_argument("--require-mode", choices=["live", "hosted"], default="live", help="Demand this actual GPU mode throughout the run.")
     parser.add_argument("--repeats", type=int, default=3, choices=range(1, 4))
     parser.add_argument("--smoke", action="store_true", help="One live session, then full reconciliation.")
     args = parser.parse_args()

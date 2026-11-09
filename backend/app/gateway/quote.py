@@ -2,7 +2,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from backend.app.config import band_for, value
 
 
-def quote(tokens, turns, cold_fraction):
+def quote(tokens, turns, cold_fraction, profile=None):
     cold = Decimal(str(cold_fraction))
     if not 0 <= cold <= 1 or not 1 <= turns <= 30:
         raise ValueError("Cold fraction must be 0–1 and turns must be 1–30")
@@ -12,7 +12,7 @@ def quote(tokens, turns, cold_fraction):
         + (1 - cold) * Decimal(value("PRICE_SELF", "0.10"))
     )
     shared = amount * Decimal(value("PRICE_SHARED", "0.15"))
-    band = band_for(tokens)
+    band = band_for(tokens, profile)
     return {
         "decision": "buy" if shared <= baseline else "compute",
         "buy_micros": int(shared.to_integral_value(rounding=ROUND_HALF_UP)),

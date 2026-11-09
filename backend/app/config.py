@@ -21,9 +21,12 @@ def sources():
     return {entry["slug"]: entry for entry in manifest()["contexts"]}
 
 
-def calibration():
+def calibration(mode="live"):
+    if mode == "hosted":
+        from .gateway.hosted import read_profile
+        return read_profile()
     return json.loads((ROOT / "bench/results/calibration.json").read_text())
 
 
-def band_for(tokens):
-    return min(calibration()["bands"], key=lambda b: abs(b["prefix_tokens"] - tokens))
+def band_for(tokens, profile=None):
+    return min((profile or calibration())["bands"], key=lambda b: abs(b["prefix_tokens"] - tokens))

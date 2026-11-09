@@ -17,6 +17,7 @@ from backend.app.api.catalog import chain, warm, observed_live_call
 from backend.app.config import band_for, calibration, value
 from backend.app.db import session_scope
 from backend.app.gateway.billing import Span, Rates, price_call, sla_breached
+from backend.app.gateway.hosted import checked_profile, fingerprint
 from backend.app.gateway.modes import health
 from backend.app.gateway.prompt_builder import Prefix
 from backend.app.gateway.quote import quote
@@ -128,7 +129,7 @@ def ensure_budget_before_next(iterator, ws, mid, rates):
             yield item
 
 
-def persist(ws, run_id, mid, owners, meter, fit, rates):
+def persist(ws, run_id, mid, owners, meter, profile, rates):
     spans = []
     with session_scope() as db:
         run = owned(db, AgentRun, run_id, ws)
@@ -156,8 +157,8 @@ def persist(ws, run_id, mid, owners, meter, fit, rates):
             cached_tokens=meter["cached_tokens"],
             output_tokens=meter["output_tokens"],
             rates=rates,
-            alpha=fit["alpha"],
-            beta=fit["beta"],
+            alpha=profile["fit"]["alpha"],
+            beta=profile["fit"]["beta"],
             self_publishers=self_layers,
         )
         actual = price_call(**args)
@@ -205,7 +206,7 @@ def persist(ws, run_id, mid, owners, meter, fit, rates):
             sla_breach=sla_breached(
                 public_hits,
                 ttft,
-                band_for(meter["prompt_tokens"])["warm_p50_ms"],
+                band_for(meter["prompt_tokens"], profile)["warm_p50_ms"],
                 float(value("SLA_FACTOR", "2")),
             ),
             fault_injected_ms=delay,
@@ -284,8 +285,11 @@ def execute(ws, identifier, context_id, tenant):
                     )
                 }
             )
-            engine = Engine() if mode == "live" else None
+            engine = Engine(mode) if mode in {"live", "hosted"} else None
             try:
+                profile = checked_profile(engine) if mode == "hosted" else calibration()
+                if mode == "hosted" and fingerprint(profile) != config["calibration_id"]:
+                    raise ValueError("Hosted calibration changed after this run was quoted.")
                 if engine is not None:
                     prefix = Prefix(engine, ctx.slug)
                     turns = live_turns(
@@ -311,6 +315,8 @@ def execute(ws, identifier, context_id, tenant):
                     )
                 for meter in ensure_budget_before_next(turns, ws, mid, rates):
                     if engine is not None:
+                        meter["mode"] = mode
+                    if mode == "live":
                         observed_live_call()
                     with lock(ws):
                         c = persist(
@@ -319,7 +325,7 @@ def execute(ws, identifier, context_id, tenant):
                             mid,
                             owners,
                             meter,
-                            calibration()["fit"],
+                            profile,
                             rates,
                         )
                         captured = capture(ws, mid)
@@ -332,7 +338,7 @@ def execute(ws, identifier, context_id, tenant):
                         and c.cached_tokens
                         < sum(len(ids) for _, ids in prefix.layers) * 0.95
                     ):
-                        warm(ctx.id, ctx.workspace_id)
+                        warm(ctx.id, ctx.workspace_id, mode)
             finally:
                 if engine is not None:
                     engine.close()
@@ -371,7 +377,9 @@ def tasks():
 
 @router.post("/agent/runs")
 def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
-    mode = health()["mode"]
+    serving = health()
+    mode = serving["mode"]
+    profile = calibration(mode)
     if mode == "unavailable":
         raise HTTPException(503, "Inference is unavailable")
     with session_scope() as db:
@@ -388,8 +396,8 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
         ):
             raise HTTPException(409, "A run is already using this mandate")
         if body.task_text is not None:
-            if mode != "live":
-                raise HTTPException(422, "Free-text tasks require the live GPU")
+            if mode not in {"live", "hosted"}:
+                raise HTTPException(422, "Free-text tasks require live inference")
             task = body.task_text
             key = "custom"
         elif body.task_id in TASKS and TASKS[body.task_id][0] == ctx.slug:
@@ -407,7 +415,11 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
             3600,
         )
         layers = chain(db, ctx)
-        q = quote(sum(c.token_len for c in layers), len(STEPS), body.cold_fraction)
+        q = quote(sum(c.token_len for c in layers), len(STEPS), body.cold_fraction, profile)
+        if mode == "hosted":
+            q["calibration_id"] = fingerprint(profile)
+            if q["calibration_id"] != serving.get("calibration_id"):
+                raise HTTPException(503, "Hosted calibration changed. Request a fresh quote.")
         if mode == "replay":
             load(
                 key,

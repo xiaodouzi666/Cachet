@@ -10,6 +10,9 @@ from backend.app.api.access import admin, current_workspace, owned
 from backend.app.config import calibration, manifest, sources, value
 from backend.app.db import session_scope
 from backend.app.models import Context, Publisher
+from backend.app.gateway.modes import health
+from backend.app.gateway.hosted import checked_profile, fingerprint
+from backend.app.operations import Control
 from backend.app.gateway.prompt_builder import Prefix
 from backend.app.gateway.quote import quote
 from backend.app.gateway.sglang_client import Engine
@@ -55,9 +58,11 @@ def listed_sources():
 
 @router.get("/benchmarks")
 def benchmarks():
-    c = calibration()
+    mode = "hosted" if health()["mode"] == "hosted" else "live"
+    c = calibration(mode)
     return [
         dict(
+            mode=mode,
             prefix_len=b["prefix_tokens"],
             cold_ttft_ms_p50=b["cold_p50_ms"],
             warm_ttft_ms_p50=b["warm_p50_ms"],
@@ -109,6 +114,12 @@ def chain(db, ctx):
 
 def view(db, c, workspace_id):
     hits, royalties, _ = marketplace.totals(db, c.id)
+    marker = db.get(Control, "probe-engine:" + c.id)
+    current = True
+    if (marker and marker.data["mode"] == "hosted") or value("HOSTED_FALLBACK_BASE_URL"):
+        serving = health()
+        prior = marker.data if marker else {"mode":"live", "calibration_id":None}
+        current = prior == {"mode":serving["mode"], "calibration_id":serving.get("calibration_id")}
     return {
         "id": c.id,
         "title": c.title,
@@ -117,10 +128,10 @@ def view(db, c, workspace_id):
         "can_manage": c.workspace_id == workspace_id,
         "publisher_id": c.publisher_id,
         "publisher_name": db.get(Publisher, c.publisher_id).name,
-        "status": c.status,
+        "status": "cold" if c.status == "hot" and not current else c.status,
         "token_len": c.token_len,
-        "last_probe_hit_ratio": c.last_probe_hit_ratio,
-        "last_probe_at": c.last_probe_at,
+        "last_probe_hit_ratio": c.last_probe_hit_ratio if current else None,
+        "last_probe_at": c.last_probe_at if current else None,
         "historical_totals_complete": marketplace.complete_history(db, c.id),
         "total_hits": hits,
         "royalty_micros": royalties,
@@ -129,11 +140,13 @@ def view(db, c, workspace_id):
     }
 
 
-def warm(context_id, ws):
+def warm(context_id, ws, mode=None):
     with session_scope(write=False) as db:
         slug = owned(db, Context, context_id, ws).slug
     try:
-        with Engine() as eng:
+        mode = mode or health()["mode"]
+        with Engine(mode) as eng:
+            profile_id = fingerprint(checked_profile(eng)) if mode == "hosted" else None
             ratio = Prefix(eng, slug).warm(eng)
     except Exception:
         with session_scope() as db:
@@ -143,6 +156,7 @@ def warm(context_id, ws):
         return
     with session_scope() as db:
         c = owned(db, Context, context_id, ws)
+        db.merge(Control(key="probe-engine:" + c.id, data={"mode":mode, "calibration_id":profile_id}))
         c.status = "hot" if ratio >= 0.95 else "cold"
         c.last_probe_hit_ratio = ratio
         c.last_probe_at = datetime.now(timezone.utc)
@@ -220,10 +234,11 @@ def rewarm(identifier: str, bg: BackgroundTasks, ws=wsdep):
 
 @router.post("/quote")
 def quote_context(body: QuoteInput, ws=Depends(viewer)):
+    profile = calibration(health()["mode"])
     with session_scope(write=False) as db:
         ctx = marketplace.visible_context(db, body.context_id, ws)
         return quote(
-            sum(x.token_len for x in chain(db, ctx)), body.est_turns, body.cold_fraction
+            sum(x.token_len for x in chain(db, ctx)), body.est_turns, body.cold_fraction, profile
         )
 
 

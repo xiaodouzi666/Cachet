@@ -38,6 +38,7 @@ from backend.app.models import (
 )
 from backend.app.operations import Control
 from backend.app.money import usd_to_micros
+from backend.app.gateway.modes import health
 from backend.app.gateway.sglang_client import Engine
 from backend.app.paypal.reconciliation import reconcile
 from backend.app.settlement import service
@@ -252,6 +253,8 @@ def fault(body: Fault, ws=wsdep):
 
 @router.post("/judge/flush-cache")
 def flush(ws=wsdep):
+    if health()["mode"] != "live":
+        raise HTTPException(409, "The judge flush control requires the primary live GPU")
     with session_scope() as db:
         throttle(db, ws, "flush")
         limit(db, ["global-cache-flush"], 1, 600)

@@ -21,9 +21,23 @@ def settings():
     return url, key
 
 
+def validate_counts(meta, token_count):
+    for name in ("prompt_tokens", "cached_tokens", "completion_tokens"):
+        if type(meta.get(name)) is not int or meta[name] < 0:
+            raise ValueError("SGLang omitted a valid request-level token count.")
+    if meta["prompt_tokens"] != token_count or meta["cached_tokens"] > meta["prompt_tokens"]:
+        raise ValueError("SGLang cache count differs from the submitted token prefix.")
+
+
 class Engine(httpx.Client):
-    def __init__(self):
-        url, key = settings()
+    def __init__(self, mode="live"):
+        if mode == "hosted":
+            from .hosted import endpoint
+            url, key = endpoint()
+        elif mode == "live":
+            url, key = settings()
+        else:
+            raise ValueError("Select a live SGLang endpoint.")
         if not key:
             raise ValueError(
                 "Configure SGLANG_API_KEY for the Cachet inference service."
@@ -48,7 +62,9 @@ class Engine(httpx.Client):
             "input_ids": ids,
             "sampling_params": {"temperature": 0, "max_new_tokens": max_new_tokens},
         }
-        return self.post("/generate", json=body).raise_for_status().json()
+        result = self.post("/generate", json=body).raise_for_status().json()
+        validate_counts(result["meta_info"], len(ids))
+        return result
 
     def timed_sample(self, ids):
         result = self.generate(ids, max_new_tokens=8)
@@ -97,6 +113,7 @@ class Engine(httpx.Client):
         if first_text_ms is None or last_event is None:
             raise RuntimeError("SGLang returned no generated text")
         meta = last_event["meta_info"]
+        validate_counts(meta, len(ids))
         reason = meta.get("finish_reason") or {}
         if not done or reason.get("type") not in {"stop", "length"}:
             raise RuntimeError("SGLang did not complete the stream successfully")
@@ -108,5 +125,6 @@ class Engine(httpx.Client):
             "fault_injected_ms": round(delay_ms, 3),
             "total_ms": round((perf_counter() - start) * 1000, 3),
             "output_tokens": meta["completion_tokens"],
+            "finish_reason": reason["type"],
             "text": last_event["text"],
         }

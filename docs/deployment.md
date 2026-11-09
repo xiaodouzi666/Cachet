@@ -10,3 +10,13 @@ The repository includes two Render Starter web services. The API owns a persiste
 6. Run the seed driver with the live GPU and genuine sandbox funding before recording the final judge video. Keep workspace cookies, webhook signatures and buyer credentials out of the footage and downloadable logs. The recording mode uses `?rec=1`.
 
 The application is configured for PayPal Sandbox. A lost GPU connection selects validated recorded workloads within the health probe cache window. The dashboard reports the actual mode. Each full financial flow still uses the PayPal API. [Sandbox and e2e commands](pricing.md)
+
+## Optional independent hosted SGLang
+
+Cachet can route a **new** run to a dedicated third-party native SGLang server when the primary GPU is unavailable. The endpoint must provide authenticated HTTPS, the project's pinned Qwen model and tokenizer, native streaming generation with per-request `meta_info.cached_tokens`, and an operator-controlled cache. Configure SGLang with the manifest model ID as both model and tokenizer path, its exact Hugging Face revision, a context window of at least 32,768 tokens and prefix caching enabled. [SGLang native endpoints](https://docs.sglang.io/docs/basic_usage/native_api) · [SGLang 0.5.23 HTTP server](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/entrypoints/http_server.py)
+
+On the Cachet API host, configure `HOSTED_FALLBACK_BASE_URL`, `HOSTED_FALLBACK_API_KEY` and a private persistent path in `HOSTED_FALLBACK_CALIBRATION`. During a maintenance window on this dedicated hosted deployment, run `.venv/bin/python scripts/calibrate_hosted.py`. This flushes its cache 25 times, verifies both licensed source token hashes and measures five cold/warm pairs at each supported length. Rerun after changing the deployment, engine or network path. This procedure consumes actual hosted inference.
+
+Before selecting hosted mode, Cachet checks the origin, model identity and measured calibration. It uses these hosted measurements for SLA and royalty attribution. The global judge flush targets the primary GPU only. A queued run pins its mode and calibration, and an interrupted run retains its committed turns. No automatic replay or second provider call resubmits a partially billed run. Without an eligible hosted deployment, validated recorded workloads remain the fallback. This repository currently has no externally provisioned hosted calibration or independent hosted receipt.
+
+With the primary unavailable and sandbox funding configured, run `.venv/bin/python scripts/e2e_demo.py --smoke --require-mode hosted --state logs/hosted-workspace.json` from the operator host. It requires the hosted health label and ten completed hosted turns before closing and reconciling that workspace.

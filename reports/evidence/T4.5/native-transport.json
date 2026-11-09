@@ -1,0 +1,22 @@
+{
+  "observed_at": "2026-11-09T06:40:46.728207+00:00",
+  "source": "Primary GPU native SGLang service",
+  "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+  "requests": [
+    {
+      "prompt_tokens": 127,
+      "cached_tokens": 0,
+      "output_tokens": 4,
+      "finish_reason": "length"
+    },
+    {
+      "prompt_tokens": 127,
+      "cached_tokens": 126,
+      "output_tokens": 4,
+      "finish_reason": "length"
+    }
+  ],
+  "unreachable_primary_in_isolated_process": "replay",
+  "independent_hosted_deployment_verified": false,
+  "hosted_calibration_configured": false
+}

@@ -55,6 +55,6 @@ def revision():
 def health():
     state=engine_health()
     return {"service":"cachet-api","version":app.version,"build":revision(),**state,
-            "gpu":calibration()["gpu"] if state["mode"]=="live" else None,
+            "gpu":calibration()["gpu"] if state["mode"]=="live" else state.get("gpu"),
             "paypal_configured":bool(value("PAYPAL_ENV","sandbox")=="sandbox" and value("PAYPAL_CLIENT_ID") and value("PAYPAL_CLIENT_SECRET")),
             "card_enabled":bool(value("SANDBOX_TEST_CARD_NUMBER") and value("SANDBOX_TEST_CARD_EXPIRY"))}
