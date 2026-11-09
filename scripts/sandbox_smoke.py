@@ -95,7 +95,11 @@ def approve_wallet(pp, order, receipt, config):
         child_env[name] = require(config, name)
     if config.get("PLAYWRIGHT_CHROMIUM_CHANNEL"):
         child_env["PLAYWRIGHT_CHROMIUM_CHANNEL"] = config["PLAYWRIGHT_CHROMIUM_CHANNEL"]
-    child = subprocess.Popen(["node", str(ROOT / "scripts/approve_buyer.ts"), link, order["id"], receipt], env=child_env)
+    units = order.get("purchase_units", [])
+    check(len(units) == 1 and units[0].get("amount", {}).get("currency_code") == "USD",
+          "Expected one USD purchase unit for this checkout.")
+    child = subprocess.Popen(["node", str(ROOT / "scripts/approve_buyer.ts"), link, order["id"], receipt,
+                              units[0]["amount"]["value"]], env=child_env)
     try:
         deadline = time.monotonic() + 170
         while time.monotonic() < deadline:
@@ -251,6 +255,11 @@ def run(scenario, journal_path):
         if scenario == "approval":
             for number in range(1, 6):
                 label = f"approval-{number}"
+                audited = journal.data["readbacks"].get(label + ".void")
+                if audited:
+                    check(pp.get_authorization(audited["id"])["status"] == "VOIDED",
+                          "Previously voided sandbox authorization changed.")
+                    continue
                 void(pp, journal, label, mandate(pp, journal, label, config))
         if scenario == "card":
             void(pp, journal, "card", mandate(pp, journal, "card", config, card=True))

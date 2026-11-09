@@ -100,7 +100,20 @@ async function approve(
           popup.getByText(state.sandbox_buyer_email, { exact: false }),
         ]);
       }
+      let mandate;
+      await expect.poll(async () => {
+        mandate = (await readState(page)).mandate;
+        return Boolean(
+          mandate?.payment_method === "wallet" &&
+          ["CREATED", "APPROVED"].includes(mandate.status) &&
+          mandate.paypal_order_id &&
+          Number.isSafeInteger(mandate.cap_micros) &&
+          mandate.cap_micros > 0 && mandate.cap_micros % 10000 === 0,
+        );
+      }, { timeout: 30000, message: "Waiting for the workspace wallet order and its verified USD budget" }).toBe(true);
       await approveSandboxPopup(popup, {
+        orderId: mandate.paypal_order_id,
+        expectedUsd: (mandate.cap_micros / 1e6).toFixed(2),
         email: state.sandbox_buyer_email,
         password: state.sandbox_buyer_password,
         returnUrl: new URL(page.url()).origin,
