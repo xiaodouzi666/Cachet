@@ -18,7 +18,7 @@ make dev
 
 The development servers bind to loopback. Use `make verify` for unit tests and non-PayPal integration tests, or `make verify-full` with the GPU and sandbox services configured. The commit hook scans the staged changes and requires Gitleaks on PATH or at `.tools/bin/gitleaks`.
 
-`make e2e` is reserved for the sandbox demo in T1.13. `make bench` invokes the TTFT benchmark once it has been implemented.
+`make e2e` is reserved for the sandbox demo in T1.13. `make bench` measures three pairs of cold and warm requests with a 26,000-token prefix on the local GPU.
 
 ## Local GPU
 

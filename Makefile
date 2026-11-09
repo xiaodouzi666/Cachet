@@ -18,7 +18,7 @@ e2e:
 	$(PYTHON) scripts/e2e_demo.py
 
 bench:
-	$(PYTHON) bench/ttft_bench.py
+	$(PYTHON) -m bench.ttft_bench
 
 hooks:
 	git config --local core.hooksPath .githooks
