@@ -1,10 +1,16 @@
 "use client";
 import { useState } from "react";
 import { count, latency, useResource } from "../lib/client";
-import type { Span } from "../lib/types";
+import type { ApplicationEvidence, Span, Task } from "../lib/types";
+import { GeneratedApplication } from "./application-check";
 import { Failure, PrefixStack, Skeleton, Tag } from "./ui";
 
-type ArchiveTurn = {
+type Strategy = "buy" | "compute";
+type ArchiveTurn = ApplicationEvidence & {
+  decision?: Strategy;
+  final_turn?: number;
+  final_output_text?: string;
+  earlier_verified_output_text?: string;
   task_id: string;
   model: string;
   mode: "recorded";
@@ -14,10 +20,85 @@ type ArchiveTurn = {
   ttft_ms: number;
   spans: Span[];
 };
+const strategyLabels = {
+  buy: "Buy shared context",
+  compute: "Compute privately",
+};
+function referencePath(task: string, strategy: Strategy) {
+  return `reference-turn?task_id=${encodeURIComponent(task)}&decision=${strategy}`;
+}
+
+function Measurement({
+  track,
+  alternate = false,
+}: {
+  track: ArchiveTurn;
+  alternate?: boolean;
+}) {
+  return (
+    <div
+      className="archive-turn"
+      data-task={track.task_id}
+      data-decision={track.decision}
+      data-alternate={alternate}
+    >
+      <div className="toolbar">
+        <h3>
+          {alternate
+            ? "Independent strategy recording"
+            : "Archived prefix measurement"}
+        </h3>
+        <Tag>Recorded GPU trace</Tag>
+      </div>
+      <p>
+        {track.model} · {track.task_id}
+        {track.decision && ` · ${strategyLabels[track.decision]}`} · Turn{" "}
+        {track.turn}
+      </p>
+      <PrefixStack
+        spans={track.spans}
+        cached={track.cached_tokens}
+        source={`Archived GPU trace · ${track.model} · ${track.task_id}, turn ${track.turn} · ${latency(track.ttft_ms)} TTFT`}
+      />
+      <small>
+        {count(track.cached_tokens)} cached / {count(track.prompt_tokens)} input
+        tokens · {latency(track.ttft_ms)} measured TTFT
+      </small>
+      <GeneratedApplication
+        evidence={track}
+        finalTurn={track.final_turn}
+        finalResponse={track.final_output_text}
+        earlierResponse={track.earlier_verified_output_text}
+      />
+    </div>
+  );
+}
 
 export function ArchivedPrefix({ expanded = false }: { expanded?: boolean }) {
   const [open, setOpen] = useState(expanded);
-  const reference = useResource<ArchiveTurn>(open ? "reference-turn" : null);
+  const [task, setTask] = useState("rate-limit"),
+    [decision, setDecision] = useState<Strategy>("buy");
+  const tasks = useResource<Task[]>(open ? "tasks" : null);
+  const reference = useResource<ArchiveTurn>(
+    open ? referencePath(task, decision) : null,
+  );
+  const track = reference.data;
+  const matches =
+    track?.task_id === task &&
+    (track.decision === decision ||
+      (!track.decision && task === "rate-limit" && decision === "buy"));
+  const other = decision === "buy" ? "compute" : "buy";
+  const candidate = useResource<ArchiveTurn>(
+    open && matches && track?.application_check?.status === "failed"
+      ? referencePath(task, other)
+      : null,
+  ).data;
+  const alternate =
+    candidate?.task_id === task &&
+    candidate.decision === other &&
+    candidate.application_check?.status === "passed"
+      ? candidate
+      : null;
   return (
     <details
       open={open}
@@ -25,35 +106,51 @@ export function ArchivedPrefix({ expanded = false }: { expanded?: boolean }) {
       className="archive-prefix"
     >
       <summary>Inspect an archived GPU turn</summary>
-      {open &&
-        (reference.loading ? (
-          <Skeleton label="Loading archived measurement" />
-        ) : reference.error ? (
-          <Failure error={reference.error} retry={reference.reload} />
-        ) : (
-          reference.data && (
-            <div className="archive-turn">
-              <div className="toolbar">
-                <h3>Archived prefix measurement</h3>
-                <Tag>Recorded GPU trace</Tag>
-              </div>
-              <p>
-                {reference.data.model} · {reference.data.task_id} · Turn{" "}
-                {reference.data.turn}
-              </p>
-              <PrefixStack
-                source={`Archived GPU trace · ${reference.data.model} · ${reference.data.task_id}, turn ${reference.data.turn} · ${latency(reference.data.ttft_ms)} TTFT`}
-                spans={reference.data.spans}
-                cached={reference.data.cached_tokens}
-              />
-              <small>
-                {count(reference.data.cached_tokens)} cached /{" "}
-                {count(reference.data.prompt_tokens)} input tokens ·{" "}
-                {latency(reference.data.ttft_ms)} measured TTFT
-              </small>
-            </div>
-          )
-        ))}
+      {open && (
+        <>
+          <div className="form-grid archive-controls">
+            <label className="field">
+              Recorded coding task
+              <select value={task} onChange={(e) => setTask(e.target.value)}>
+                {(tasks.data || []).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Recorded strategy
+              <select
+                value={decision}
+                onChange={(e) => setDecision(e.target.value as Strategy)}
+              >
+                <option value="buy">{strategyLabels.buy}</option>
+                <option value="compute">{strategyLabels.compute}</option>
+              </select>
+            </label>
+            <Failure error={tasks.error} retry={tasks.reload} />
+          </div>
+          {reference.loading ? (
+            <Skeleton label="Loading archived measurement" />
+          ) : reference.error ? (
+            <Failure error={reference.error} retry={reference.reload} />
+          ) : track && matches ? (
+            <Measurement track={track} />
+          ) : (
+            <Failure
+              error="The requested archived track was not returned."
+              retry={reference.reload}
+            />
+          )}
+          {alternate && (
+            <details key={task + other} className="alternate-archive">
+              <summary>View passing {other} archive for this task</summary>
+              <Measurement track={alternate} alternate />
+            </details>
+          )}
+        </>
+      )}
     </details>
   );
 }

@@ -1426,3 +1426,35 @@ td {
 .recording nextjs-portal {
   display: none;
 }
+
+.application-check {
+  margin: 18px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  padding: 18px;
+}
+.application-check h3 {
+  margin: 0 0 10px;
+}
+.application-result {
+  padding: 10px 0;
+}
+.application-result + .application-result {
+  border-top: 1px solid var(--line);
+}
+.application-result p {
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.check-receipt code {
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.archive-controls {
+  margin: 14px 0;
+}
+.check-receipt .receipt {
+  max-height: 18rem;
+}

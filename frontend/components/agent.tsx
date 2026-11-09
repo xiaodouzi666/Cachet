@@ -1,10 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api, count, describe, latency, usd, useResource } from "../lib/client";
-import type { ContextRow, Quote, Run, Task, Turn } from "../lib/types";
+import type {
+  ApplicationEvidence,
+  ContextRow,
+  Quote,
+  Run,
+  Task,
+  Turn,
+} from "../lib/types";
 import { useSession } from "./shell";
 import { Empty, Failure, PrefixStack, Skeleton, Tag } from "./ui";
 import { ArchivedPrefix } from "./archive";
+import { GeneratedApplication } from "./application-check";
 import { Wallet } from "./wallet";
 
 type StreamItem = { event: string; text: string };
@@ -19,13 +27,15 @@ function RunFeed({
   const [turns, setTurns] = useState<Turn[]>([]),
     [activity, setActivity] = useState<StreamItem[]>([]),
     [error, setError] = useState(""),
-    [done, setDone] = useState(false),
+    [terminal, setTerminal] = useState<string | null>(null),
+    [evidence, setEvidence] = useState<ApplicationEvidence | null>(null),
     [attempt, setAttempt] = useState(0);
   useEffect(() => {
     setViewTurn(null);
     setTurns([]);
     setActivity([]);
-    setDone(false);
+    setTerminal(null);
+    setEvidence(null);
     setError("");
     const source = new EventSource(
       `/api/agent/runs/${encodeURIComponent(run.id)}/events`,
@@ -57,11 +67,12 @@ function RunFeed({
             );
           } else if (name === "error") {
             setError(d.message || d.detail || "The agent run failed.");
-            setDone(true);
+            setTerminal("failed");
             source.close();
             void onComplete().catch((e) => setError(describe(e)));
           } else if (name === "done") {
-            setDone(true);
+            setTerminal(d.status || "completed");
+            if (d.application_check) setEvidence(d);
             source.close();
             void onComplete().catch((e) => setError(describe(e)));
             setActivity((p) => [
@@ -105,6 +116,18 @@ function RunFeed({
     source.onopen = () => setError("");
     return () => source.close();
   }, [run.id, attempt, onComplete]);
+  const started =
+    turns.length > 0 ||
+    activity.some(
+      (item) => item.event === "decision" || item.event === "quote",
+    );
+  const state =
+    terminal || (started && run.status === "queued" ? "running" : run.status);
+  const finished = state === "completed" || state === "failed";
+  const finalTurn = turns.length
+    ? Math.max(...turns.map((t) => t.turn))
+    : undefined;
+  const responseId = (n: number) => `response-${run.id}-${n}`;
   const latest = turns.find((t) => t.turn === viewTurn) || turns.at(-1);
   return (
     <section className="panel">
@@ -116,11 +139,18 @@ function RunFeed({
             <Tag tone="warn">Operator-generated test session</Tag>
           )}
         </div>
-        <Tag tone={done ? "neutral" : "good"}>
-          {done ? "Finished" : "Following run"}
+        <Tag tone={state === "failed" ? "bad" : finished ? "neutral" : "good"}>
+          Metered run · {state}
         </Tag>
       </div>
       <Failure error={error} retry={() => setAttempt((n) => n + 1)} />
+      {(finished || evidence?.application_check || run.application_check) && (
+        <GeneratedApplication
+          evidence={evidence || run}
+          finalTurn={terminal === "completed" ? finalTurn : undefined}
+          answerLink={(n) => "#" + responseId(n)}
+        />
+      )}
       {activity.length > 0 && (
         <ul className="events">
           {activity.map((item, i) => (
@@ -200,9 +230,10 @@ function RunFeed({
             <details>
               <summary>Model responses</summary>
               {turns.map((t) => (
-                <pre key={t.turn} className="receipt">
-                  {t.output_text || t.text}
-                </pre>
+                <section key={t.turn} id={responseId(t.turn)}>
+                  <h4>Turn {t.turn}</h4>
+                  <pre className="receipt">{t.output_text ?? t.text}</pre>
+                </section>
               ))}
             </details>
           )}
@@ -238,7 +269,9 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
   const actualTask = taskId === "custom" ? "custom" : selected?.id;
   const isCustom = taskId === "custom";
   const turnCount = selected?.turns || tasks.data?.[0]?.turns;
-  const currentRun = run || session.state?.run || null;
+  const observed = session.state?.run;
+  const currentRun =
+    run && run.id !== observed?.id ? run : observed || run || null;
   const mandate = session.state?.mandate || null;
   const authorized =
     !!mandate &&

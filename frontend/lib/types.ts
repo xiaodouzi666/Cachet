@@ -39,7 +39,20 @@ export type Mandate = {
   authorization_id?: string;
   paypal_order_id?: string;
 };
-export type Run = {
+export type ApplicationCheck = {
+  status: "passed" | "failed" | "unverified";
+  reason?: string;
+  requested_format_met?: boolean;
+  answer_sha256?: string;
+  source_sha256?: string;
+  http?: unknown;
+};
+export type ApplicationEvidence = {
+  application_check?: ApplicationCheck | null;
+  verified_application_turn?: number | null;
+  earlier_application_check?: ApplicationCheck | null;
+};
+export type Run = ApplicationEvidence & {
   id: string;
   status: string;
   decision?: string;

@@ -327,7 +327,21 @@ async function applySeedJournal(context, baseURL, file) {
 }
 
 const scenes = {
-  async S1({ page, go, mark }) {
+  async S1({ page, go, mark, archiveGallery }) {
+    if (archiveGallery) {
+      await go("/dev/ui");
+      const archive = page.locator('.archive-turn[data-alternate="false"]');
+      await expect(archive).toHaveAttribute("data-task", "rate-limit");
+      await expect(archive).toHaveAttribute("data-decision", "buy");
+      await archive
+        .getByRole("button", { name: "Inspect measured segments" })
+        .click();
+      await expect(
+        page.getByRole("dialog", { name: "Measured prefix segments" }),
+      ).toBeVisible();
+      await mark("gallery-archived-gpu-trace-prefix");
+      return;
+    }
     await go("/agent");
     await expect(
       page.getByRole("heading", { name: "Run activity" }),
@@ -467,6 +481,9 @@ const scenes = {
 async function main() {
   const args = process.argv.slice(2);
   const rehearsal = args.includes("--rehearsal");
+  const archiveGallery = args.includes("--archive-gallery");
+  if (archiveGallery && !rehearsal)
+    throw Error("The public archive gallery is available for rehearsals only.");
   const baseURL = process.env.CACHET_WEB_URL;
   if (!baseURL || (!rehearsal && new URL(baseURL).protocol !== "https:"))
     throw Error(
@@ -527,7 +544,7 @@ async function main() {
             ms: Math.round(performance.now() - start),
           });
         };
-        await scenes[name]({ page, go, mark, baseURL });
+        await scenes[name]({ page, go, mark, baseURL, archiveGallery });
         if (!useSeed) {
           const capture = await context.storageState();
           const domain = new URL(baseURL).hostname;
