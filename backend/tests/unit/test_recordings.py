@@ -94,3 +94,13 @@ def test_compiler_and_previous_sandbox_feedback_are_in_subsequent_prompt():
         http_feedback=proposal["http_feedback"],
     )
     assert proposal["http_feedback"] in next_prompt
+
+
+def test_fastapi_review_uses_the_contract_in_the_existing_dialogue():
+    from backend.app.agents.tasks import CONTRACTS, STEPS, TASKS, turn_question
+
+    task = TASKS["rate-limit"][1]
+    questions = [turn_question(task, i, step) for i, step in enumerate(STEPS)]
+    compact_turns = [i + 1 for i, q in enumerate(questions) if CONTRACTS[task] not in q]
+    assert compact_turns == [7, 8]
+    assert all("200, 200, 429" in questions[i - 1] for i in compact_turns)

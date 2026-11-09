@@ -1,14 +1,14 @@
 {
-  "method": "Four separate deterministic GPU conversations. Default tariff applied to the recorded counters. No funds moved.",
+  "method": "Four separate GPU conversations evaluated at the default tariff. SLA breaches use twice the nearest calibrated warm p50 and require a public hit. Royalties on compliant turns are metered estimates before payment rounding. No funds moved.",
   "runs": [
     {
       "task": "rate-limit",
       "decision": "buy",
       "turns": 10,
       "generated_application_check": {
-        "answer_sha256": "9f018c85c617d76624baa3d9fe0e5fad66a39bfad4a51dd3598c905aaeaf5147",
+        "answer_sha256": "1dfed6a71be8c73384775d133c6b03f8fc2efa9992094695cfffaeb11c4596db",
         "requested_format_met": false,
-        "source_sha256": "dd252fe42cba2cd580391d2f39ba8ffa54d93fd28ee3c4ad8afb1b28b5ef186a",
+        "source_sha256": "debc19cdfecea89fd31dcd9fbf5aa7b3d64cca950ae0981cbafe8a03c458bd5f",
         "http": {
           "distinct_clients": 2,
           "status_codes": [
@@ -27,11 +27,25 @@
       },
       "verified_application_turn": 10,
       "source": "backend/app/replay/traces/rate-limit-buy.json",
-      "first_ttft_ms": 192.252,
-      "median_ttft_ms": 183.909,
-      "cached_tokens": 275915,
-      "output_tokens": 1229,
-      "priced_usage_micros": 45957,
+      "first_ttft_ms": 185.583,
+      "median_ttft_ms": 167.328,
+      "cached_tokens": 275251,
+      "output_tokens": 1224,
+      "priced_usage_micros": 45621,
+      "sla_breach_turns": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        9,
+        10
+      ],
+      "royalties_on_sla_compliant_turns_micros": {
+        "starlette": 1390,
+        "fastapi": 682
+      },
       "publisher_royalty_micros": 10360
     },
     {
@@ -39,9 +53,9 @@
       "decision": "compute",
       "turns": 10,
       "generated_application_check": {
-        "answer_sha256": "9f018c85c617d76624baa3d9fe0e5fad66a39bfad4a51dd3598c905aaeaf5147",
-        "requested_format_met": false,
-        "source_sha256": "dd252fe42cba2cd580391d2f39ba8ffa54d93fd28ee3c4ad8afb1b28b5ef186a",
+        "answer_sha256": "41d0f7cf5f4ffb16a616bcd1d1726f80f0ecf0cf71597438749463a3b5a84e17",
+        "requested_format_met": true,
+        "source_sha256": "d171a8e35496f20a0e114887c32bfaea5c0d963d4cc849a01d32effec4bef6da",
         "http": {
           "distinct_clients": 2,
           "status_codes": [
@@ -60,11 +74,13 @@
       },
       "verified_application_turn": 10,
       "source": "backend/app/replay/traces/rate-limit-compute.json",
-      "first_ttft_ms": 8338.7,
-      "median_ttft_ms": 183.255,
-      "cached_tokens": 249739,
-      "output_tokens": 1227,
-      "priced_usage_micros": 56291,
+      "first_ttft_ms": 8276.975,
+      "median_ttft_ms": 167.877,
+      "cached_tokens": 249556,
+      "output_tokens": 1307,
+      "priced_usage_micros": 56174,
+      "sla_breach_turns": [],
+      "royalties_on_sla_compliant_turns_micros": {},
       "publisher_royalty_micros": 0
     },
     {
@@ -96,6 +112,21 @@
       "cached_tokens": 140880,
       "output_tokens": 1518,
       "priced_usage_micros": 26524,
+      "sla_breach_turns": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "royalties_on_sla_compliant_turns_micros": {
+        "starlette": 0
+      },
       "publisher_royalty_micros": 4800
     },
     {
@@ -115,6 +146,8 @@
       "cached_tokens": 129224,
       "output_tokens": 1591,
       "priced_usage_micros": 31466,
+      "sla_breach_turns": [],
+      "royalties_on_sla_compliant_turns_micros": {},
       "publisher_royalty_micros": 0
     }
   ]

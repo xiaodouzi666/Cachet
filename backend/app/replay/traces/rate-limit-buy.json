@@ -14,18 +14,18 @@
     "cold_fraction": 0.25
   },
   "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
-  "tenant": "63eb1b89",
+  "tenant": "7a22ec87",
   "output_limit": 640,
-  "signature": "5b5075237d2a509ac0740d1ab8d1819471b365d6d6093c36fe68923452761f21",
+  "signature": "0e89e7f9624f579cee41ed07bb48e1dc2f48042bbcbc2fe6753e83c72ec64bdc",
   "turns": [
     {
       "kind": "result",
       "prompt_tokens": 26260,
       "cached_tokens": 25913,
-      "ttft_ms": 192.252,
-      "engine_ttft_ms": 192.251,
+      "ttft_ms": 185.583,
+      "engine_ttft_ms": 185.583,
       "fault_injected_ms": 0.0,
-      "total_ms": 1071.21,
+      "total_ms": 1067.022,
       "output_tokens": 85,
       "finish_reason": "stop",
       "text": "Strategy: Use a dictionary of lists to track request timestamps for each client host. The cost of cold starts (8431.807 microdollars) is significantly higher than compute (84175 microdollars), so focus on minimizing cold starts by caching client host quotas locally. This approach balances initial setup cost with ongoing performance, ensuring quick responses for returning clients while managing new ones efficiently.",
@@ -62,17 +62,17 @@
           "end": 26260
         }
       ],
-      "input_hash": "93e38cb431ef6e73a5e8bda2e33ea63098454120e40bf655a4c74bafa3817bc3",
+      "input_hash": "8c0499442dba3d63cfa8b7fd62d9d333af3380e9f27ebe002aa15cb9c82d73ed",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 26580,
       "cached_tokens": 26345,
-      "ttft_ms": 163.594,
-      "engine_ttft_ms": 163.592,
+      "ttft_ms": 163.595,
+      "engine_ttft_ms": 163.594,
       "fault_injected_ms": 0.0,
-      "total_ms": 909.32,
+      "total_ms": 909.199,
       "output_tokens": 72,
       "finish_reason": "stop",
       "text": "Feature: Rate-limit GET /ping to allow 2 requests per client in 60 seconds, return 429 on third request.\n\nAcceptance:\n1. First two requests within 60 seconds return {'pong': True}.\n2. Third request within 60 seconds returns 429.\n3. Different clients have independent quotas.",
@@ -109,20 +109,20 @@
           "end": 26580
         }
       ],
-      "input_hash": "f9cf56d2e63ab1efba9ec118dc213b7e295a4fd3c017250b9a952b70f8b62ede",
+      "input_hash": "0b0bb072d67500cdb431df48ece1ef81b1ff24ec25d41984b912d233fb20854d",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 26889,
       "cached_tokens": 26652,
-      "ttft_ms": 165.134,
-      "engine_ttft_ms": 165.134,
+      "ttft_ms": 165.188,
+      "engine_ttft_ms": 165.187,
       "fault_injected_ms": 0.0,
-      "total_ms": 609.169,
-      "output_tokens": 43,
+      "total_ms": 566.999,
+      "output_tokens": 39,
       "finish_reason": "stop",
-      "text": "Relevant framework classes:\n- `FastAPI`\n- `app.middleware`\n- `app.get`\n- `JSONResponse`\n- `time.monotonic`\n\nThese classes are used in the provided framework source.",
+      "text": "Relevant framework classes:\n- `FastAPI`\n- `JSONResponse`\n- `time.monotonic`\n- `@app.middleware('http')`\n- `@app.get('/')`",
       "turn": 3,
       "spans": [
         {
@@ -156,20 +156,20 @@
           "end": 26889
         }
       ],
-      "input_hash": "e6b261e75a283639ceb30e64b07099facea5d9c791416a7bf6ff048427874071",
+      "input_hash": "c9651601f61b6c74b2a5e32771eabad6ee599b532c8efdb8b778982adc0f81da",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 27166,
-      "cached_tokens": 26932,
-      "ttft_ms": 167.532,
-      "engine_ttft_ms": 167.532,
+      "prompt_tokens": 27162,
+      "cached_tokens": 26928,
+      "ttft_ms": 167.449,
+      "engine_ttft_ms": 167.448,
       "fault_injected_ms": 0.0,
-      "total_ms": 581.626,
-      "output_tokens": 40,
+      "total_ms": 624.277,
+      "output_tokens": 44,
       "finish_reason": "stop",
-      "text": "Request path:\n1. `app.middleware('http')`\n2. `app.get('/ping')`\n3. Middleware checks client host and timestamps\n4. Returns JSONResponse or calls next middleware",
+      "text": "Request path:\n1. `@app.middleware('http')`\n2. `time.monotonic`\n3. `app.get('/ping')`\n4. `JSONResponse` with status_code=429",
       "turn": 4,
       "spans": [
         {
@@ -200,23 +200,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 27166
+          "end": 27162
         }
       ],
-      "input_hash": "326f351810cd197fe919648d7e7910378eeab42f6fa8660fd0d0a1acbd352eae",
+      "input_hash": "0e3e1c9a8abcaccf600cc1f3a277824522ff0e1779a38eb0982438a88290b28a",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 27442,
       "cached_tokens": 27206,
-      "ttft_ms": 167.68,
-      "engine_ttft_ms": 167.68,
+      "ttft_ms": 167.207,
+      "engine_ttft_ms": 167.206,
       "fault_injected_ms": 0.0,
-      "total_ms": 2172.966,
-      "output_tokens": 189,
+      "total_ms": 2151.438,
+      "output_tokens": 187,
       "finish_reason": "stop",
-      "text": "```python\nfrom fastapi import FastAPI, Request, JSONResponse\nfrom time import monotonic\nfrom typing import Dict, List\n\napp = FastAPI()\n\nrate_limits: Dict[str, List[float]] = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n```\n\nThis middleware limits requests to 2 per client in 60 seconds, returning 429 on the third request.",
+      "text": "```python\nfrom fastapi import FastAPI, Request, JSONResponse\nfrom time import monotonic\nfrom typing import Dict, List\n\napp = FastAPI()\n\nrate_limits: Dict[str, List[float]] = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n```\n\nGET /ping returns JSON {'pong': True}. Third request within 60 seconds returns 429.",
       "turn": 5,
       "spans": [
         {
@@ -250,17 +250,17 @@
           "end": 27442
         }
       ],
-      "input_hash": "cd15a708fe01a244525734dcaa022e41d8d25b182f53dc439d452b695d38df7e",
+      "input_hash": "22ac79e1d566ad25877920d065913fb6189f13562460786fb43cc70588aee87e",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 27973,
-      "cached_tokens": 27631,
-      "ttft_ms": 191.948,
-      "engine_ttft_ms": 191.948,
+      "prompt_tokens": 27971,
+      "cached_tokens": 27629,
+      "ttft_ms": 190.609,
+      "engine_ttft_ms": 190.609,
       "fault_injected_ms": 0.0,
-      "total_ms": 2011.885,
+      "total_ms": 2010.216,
       "output_tokens": 170,
       "finish_reason": "stop",
       "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return {\"pong\": True}\n```",
@@ -294,24 +294,24 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 27973
+          "end": 27971
         }
       ],
-      "input_hash": "e39983bfe1cff956268f404e7b37a952f2754b3fc06525db0fd5d42acbae7758",
+      "input_hash": "b0dbdc45f9e31b0e5f96ccdc5d8f44cd45df5f0d362667f63d31e51af74b7ac0",
       "mode": "live",
       "http_feedback": "HTTP smoke passed: {\"distinct_clients\": 2, \"status_codes\": [200, 200, 429, 200]}"
     },
     {
       "kind": "result",
-      "prompt_tokens": 28447,
-      "cached_tokens": 28143,
-      "ttft_ms": 196.051,
-      "engine_ttft_ms": 196.05,
+      "prompt_tokens": 28315,
+      "cached_tokens": 28141,
+      "ttft_ms": 114.016,
+      "engine_ttft_ms": 114.015,
       "fault_injected_ms": 0.0,
-      "total_ms": 2149.677,
-      "output_tokens": 181,
+      "total_ms": 2252.262,
+      "output_tokens": 198,
       "finish_reason": "stop",
-      "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return {\"pong\": True}\n```\n\nThis code meets the contract and compiles successfully.",
+      "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return JSONResponse(content={\"pong\": True})\n```\n\nThis code ensures each client can make two requests within 60 seconds before receiving a 429 status code.",
       "turn": 7,
       "spans": [
         {
@@ -342,23 +342,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 28447
+          "end": 28315
         }
       ],
-      "input_hash": "3f8a811ca115ef5a6f6bf177afb267f9e8db5cf1a130745638f73910dd9a0f47",
+      "input_hash": "476c3ba1cd07b0ab8b43f1fab5aa980c0f107ab327065f256ee52dee7513e456",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 28882,
-      "cached_tokens": 28628,
-      "ttft_ms": 175.87,
-      "engine_ttft_ms": 175.869,
+      "prompt_tokens": 28637,
+      "cached_tokens": 28513,
+      "ttft_ms": 93.866,
+      "engine_ttft_ms": 93.865,
       "fault_injected_ms": 0.0,
-      "total_ms": 1160.201,
-      "output_tokens": 91,
+      "total_ms": 766.717,
+      "output_tokens": 63,
       "finish_reason": "stop",
-      "text": "To test the rate-limiting middleware:\n\n1. Send two requests within 60 seconds to `/ping` from the same client.\n2. Expect status_code 200.\n3. Send a third request within 60 seconds.\n4. Expect status_code 429.\n5. Send requests from different clients.\n6. Expect status_code 200 for each.\n\nThis covers the successful path and rate-limiting behavior.",
+      "text": "HTTP requests and assertions:\n1. Send 2 requests within 60 seconds: Expect status_code 200.\n2. Send 1 more request: Expect status_code 429.\n3. Wait 60 seconds, send 2 requests: Expect status_code 200.",
       "turn": 8,
       "spans": [
         {
@@ -389,23 +389,23 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 28882
+          "end": 28637
         }
       ],
-      "input_hash": "429424da8be7251562499bf5c54fb5d4cca1fd5122c51b8d9374faaf285aa648",
+      "input_hash": "89a822c83536d8e18274a3eb328b409873ac62c95f7885a6d2d630534e9afe0e",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 29306,
-      "cached_tokens": 28973,
-      "ttft_ms": 200.616,
-      "engine_ttft_ms": 200.616,
+      "prompt_tokens": 29033,
+      "cached_tokens": 28700,
+      "ttft_ms": 194.816,
+      "engine_ttft_ms": 194.815,
       "fault_injected_ms": 0.0,
-      "total_ms": 2238.077,
-      "output_tokens": 186,
+      "total_ms": 2281.685,
+      "output_tokens": 191,
       "finish_reason": "stop",
-      "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return {\"pong\": True}\n```\n\nThis module implements the rate-limiting middleware and the `/ping` endpoint.",
+      "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return JSONResponse(content={\"pong\": True})\n```\n\nThis module implements the rate-limiting middleware and the `/ping` endpoint as specified.",
       "turn": 9,
       "spans": [
         {
@@ -436,24 +436,24 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 29306
+          "end": 29033
         }
       ],
-      "input_hash": "65898cab1baf85a9267ab7b0623fb2e9f654e8a63e840736dff51de24f6a7aad",
+      "input_hash": "de6a8cf503d50c734b4dc239f338c7edebcb0f6da97139316f4294ef649a8162",
       "mode": "live",
       "http_feedback": "HTTP smoke passed: {\"distinct_clients\": 2, \"status_codes\": [200, 200, 429, 200]}"
     },
     {
       "kind": "result",
-      "prompt_tokens": 29921,
-      "cached_tokens": 29492,
-      "ttft_ms": 291.868,
-      "engine_ttft_ms": 291.868,
+      "prompt_tokens": 29653,
+      "cached_tokens": 29224,
+      "ttft_ms": 288.49,
+      "engine_ttft_ms": 288.489,
       "fault_injected_ms": 0.0,
-      "total_ms": 2196.186,
-      "output_tokens": 172,
+      "total_ms": 2218.327,
+      "output_tokens": 175,
       "finish_reason": "stop",
-      "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return {\"pong\": True}\n```\n```",
+      "text": "```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import JSONResponse\nfrom time import monotonic\n\napp = FastAPI()\n\nrate_limits = {}\n\n@app.middleware(\"http\")\nasync def rate_limit_middleware(request: Request, call_next):\n    client_host = request.client.host\n    timestamps = rate_limits.get(client_host, [])\n    now = monotonic()\n    timestamps = [t for t in timestamps if t > now - 60]\n    if len(timestamps) < 2:\n        timestamps.append(now)\n    else:\n        return JSONResponse(status_code=429, content={\"detail\": \"Too Many Requests\"})\n    rate_limits[client_host] = timestamps[:2]\n    return await call_next(request)\n\n@app.get(\"/ping\")\nasync def ping():\n    return JSONResponse(content={\"pong\": True})\n```\n```",
       "turn": 10,
       "spans": [
         {
@@ -484,18 +484,18 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 29921
+          "end": 29653
         }
       ],
-      "input_hash": "66126b7502af3b7b5a7386d178e390a5509fc0c69891c333d2ce6e42f22e287e",
+      "input_hash": "c6f6256f17249fffbb616e76ee4d4572ea8fc94f72933df02b0f01d67f71fee1",
       "mode": "live"
     }
   ],
-  "recorded_at": "2026-11-09T06:39:02.574476+00:00",
+  "recorded_at": "2026-11-09T07:02:39.864508+00:00",
   "application_check": {
-    "answer_sha256": "9f018c85c617d76624baa3d9fe0e5fad66a39bfad4a51dd3598c905aaeaf5147",
+    "answer_sha256": "1dfed6a71be8c73384775d133c6b03f8fc2efa9992094695cfffaeb11c4596db",
     "requested_format_met": false,
-    "source_sha256": "dd252fe42cba2cd580391d2f39ba8ffa54d93fd28ee3c4ad8afb1b28b5ef186a",
+    "source_sha256": "debc19cdfecea89fd31dcd9fbf5aa7b3d64cca950ae0981cbafe8a03c458bd5f",
     "http": {
       "distinct_clients": 2,
       "status_codes": [

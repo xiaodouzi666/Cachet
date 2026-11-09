@@ -133,6 +133,10 @@ def turn_question(
     contract = CONTRACTS.get(task, "")
     if not contract and step == len(STEPS) - 1:
         instruction = "Deliver the final artifact or complete explanation requested by the user's task."
+    # Once the first implementation is in the dialogue, review and test planning
+    # need just the observable behavior. Code generation keeps the full contract.
+    if task == TASKS["rate-limit"][1] and step in (6, 7):
+        contract = "Per client: 200, 200, 429. Return JSONResponse directly from middleware on rejection."
     q = (
         f"Task: {task}\n"
         + (f"Application contract: {contract}\n" if contract else "")
