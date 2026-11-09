@@ -99,6 +99,7 @@ export type Turn = {
   fault_injected_ms?: number;
 };
 export type Bench = {
+  mode?: "live" | "hosted";
   prefix_len: number;
   cold_ttft_ms_p50: number;
   warm_ttft_ms_p50: number;

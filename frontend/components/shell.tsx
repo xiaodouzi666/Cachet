@@ -68,7 +68,7 @@ function Mode({ health, error }: { health: Health | null; error: string }) {
     name === "live"
       ? "Live · self-hosted GPU"
       : name === "hosted"
-        ? "Live · hosted cache"
+        ? "Live · hosted cache fallback"
         : name === "replay"
           ? "Recorded GPU replay"
           : name === "unavailable" || error

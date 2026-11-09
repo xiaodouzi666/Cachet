@@ -341,7 +341,8 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
                     {t.title}
                   </option>
                 ))}
-                {health.data?.mode === "live" && (
+                {(health.data?.mode === "live" ||
+                  health.data?.mode === "hosted") && (
                   <option value="custom">Custom task</option>
                 )}
               </select>

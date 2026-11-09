@@ -98,7 +98,11 @@ export default function Home() {
           <div>
             <h2>Inference benchmark</h2>
             <p>
-              Median time to first text{band?.gpu ? ` on the ${band.gpu}` : ""}.
+              Median time to first text{band?.gpu ? ` on the ${band.gpu}` : ""}
+              {band?.mode === "hosted"
+                ? " · independently calibrated hosted fallback"
+                : ""}
+              .
             </p>
           </div>
         </div>

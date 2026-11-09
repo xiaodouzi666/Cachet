@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { ChevronRight, Compass, ShieldCheck } from "lucide-react";
+import { hasRunnableLayers } from "../lib/judge";
 import { useSession } from "./shell";
 import { Wallet } from "./wallet";
 import { Publisher } from "./publisher";
@@ -88,19 +89,7 @@ export function Judge() {
     }
   }
   const replay = session.mode === "replay";
-  const starlette = catalog.data?.find(
-    (c) => c.slug === "starlette" && (replay || c.status === "hot"),
-  );
-  const requiredLayers = Boolean(
-    (replay || session.mode === "live") &&
-      starlette &&
-      catalog.data?.some(
-        (c) =>
-          c.slug === "fastapi" &&
-          c.parent_id === starlette.id &&
-          (replay || c.status === "hot"),
-      ),
-  );
+  const requiredLayers = hasRunnableLayers(catalog.data || [], session.mode);
   const isJudge = session.state?.kind === "judge";
   const mandate = session.state?.mandate;
   const hasAuth = !!mandate?.authorization_id;
@@ -252,6 +241,11 @@ export function Judge() {
           </div>
           <hr className="section-rule" />
           <h3>Global engine cache</h3>
+          {session.mode === "hosted" && (
+            <p className="help">
+              Global cache flush is available only on the self-hosted GPU.
+            </p>
+          )}
           {replay && (
             <p className="help">
               Cache flush requires the live GPU. Recorded workloads preserve the
