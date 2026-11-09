@@ -1,0 +1,1 @@
+Cachet brings engine-measured prefix reuse to PayPal Orders, Payments, Payouts, and Webhooks. The PayPal Agent Toolkit supports the operations copilot. A self-hosted Qwen model runs on S G Lang. The benchmark, source licenses, and local testing instructions are included in the repository.

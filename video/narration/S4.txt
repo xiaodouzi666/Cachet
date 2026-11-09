@@ -1,0 +1,1 @@
+The developer chooses a spending cap. PayPal Sandbox holds the budget when the buyer approves the order. Before running the task, the agent compares the shared price with the expected cost of computing privately. The assumed cold fraction is visible in the quote.

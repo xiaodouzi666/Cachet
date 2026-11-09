@@ -1,0 +1,1 @@
+Coding agents repeatedly read the same open-source code. Each new session can pay to process thousands of tokens again. The maintainers who wrote that code earn nothing from those reads.

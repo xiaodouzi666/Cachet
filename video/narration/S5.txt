@@ -1,0 +1,1 @@
+Each turn sends exact token IDs to the inference engine. The returned hit count determines which shared tokens earn royalties. Private input and generated output have separate rates. Cachet accrues microdollars and requests captures in whole cents against the approved budget.
