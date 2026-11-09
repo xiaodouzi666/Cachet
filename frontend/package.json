@@ -6,14 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:studio": "playwright test --config=playwright.studio.config.ts"
+    "test:studio": "playwright test --config=playwright.studio.config.ts",
+    "test:e2e": "playwright test --config=playwright.e2e.config.ts"
   },
   "engines": {
     "node": ">=18.18.0"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "ag-grid-community": "36.3.0",
+    "ag-grid-react": "36.3.0",
     "ag-studio": "3.1.0",
     "ag-studio-react": "3.1.0",
+    "lucide-react": "1.70.0",
     "next": "15.5.29",
     "react": "19.3.1",
     "react-dom": "19.3.1"
@@ -23,6 +29,14 @@
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "autoprefixer": "10.4.27",
+    "postcss": "8.5.32",
+    "tailwindcss": "3.4.19",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "$postcss"
+    }
   }
 }
