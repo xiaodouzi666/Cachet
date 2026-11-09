@@ -71,7 +71,8 @@ class Parts:
     royalties: dict[str, int]
 
     def __post_init__(self):
-        if (not 0 <= self.public <= self.principal or any(type(n) is not int or n < 0 for n in self.royalties.values())
+        if (type(self.public) is not int or type(self.principal) is not int or
+                not 0 <= self.public <= self.principal or any(type(n) is not int or n < 0 for n in self.royalties.values())
                 or sum(self.royalties.values()) > self.public):
             raise LedgerError("The charge decomposition is inconsistent")
 

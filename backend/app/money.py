@@ -1,6 +1,6 @@
 """USD amounts persisted by Cachet. PayPal operations operate on whole cents."""
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 
 MICROS_PER_USD = 1_000_000
@@ -13,7 +13,13 @@ def as_fraction(value) -> Fraction:
     if isinstance(value, Fraction):
         return value
     # Parse decimal notation, including JSON decimal rates passed as strings.
-    return Fraction(Decimal(str(value)))
+    try:
+        decimal = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError("Expected a decimal monetary amount") from exc
+    if not decimal.is_finite():
+        raise ValueError("Monetary values must be finite")
+    return Fraction(decimal)
 
 
 def half_up(value: Fraction) -> int:

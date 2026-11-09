@@ -26,7 +26,7 @@ class Rates:
 
     @classmethod
     def from_settings(cls, values):
-        return cls(*(values.get(k) or default for k, default in zip(
+        return cls(*(values[k] if values.get(k) not in (None, "") else default for k, default in zip(
             ("PRICE_FULL", "PRICE_SELF", "PRICE_SHARED", "ROYALTY_RATE", "PRICE_OUT"),
             ("1.00", "0.10", "0.15", "0.04", "2.00")
         )))
