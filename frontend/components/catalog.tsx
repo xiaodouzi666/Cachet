@@ -9,6 +9,7 @@ import {
 } from "ag-grid-community";
 import { Search, RotateCw } from "lucide-react";
 import { Empty, Failure, Skeleton, Tag } from "./ui";
+import { useSession } from "./shell";
 import { count, usd, useResource } from "../lib/client";
 import type { ContextRow } from "../lib/types";
 
@@ -22,6 +23,7 @@ const gridTheme = themeQuartz.withParams({
   wrapperBorderRadius: 8,
 });
 export function Catalog() {
+  const replay = useSession().mode === "replay";
   const {
     data: rows,
     loading,
@@ -56,7 +58,9 @@ export function Catalog() {
         field: "status",
         headerName: "State",
         cellRenderer: ({ value }: { value: string }) => (
-          <Tag tone={value === "hot" ? "good" : "neutral"}>{value}</Tag>
+          <Tag tone={replay ? "neutral" : value === "hot" ? "good" : "neutral"}>
+            {replay ? "Recorded workload" : value}
+          </Tag>
         ),
       },
       {
@@ -85,7 +89,7 @@ export function Catalog() {
         valueFormatter: ({ value }) => usd(value),
       },
     ],
-    [rows],
+    [rows, replay],
   );
   return (
     <section className="panel">

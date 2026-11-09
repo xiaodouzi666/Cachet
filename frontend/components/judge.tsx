@@ -87,8 +87,19 @@ export function Judge() {
       setBusy("");
     }
   }
-  const requiredLayers = ["starlette", "fastapi"].every((slug) =>
-    catalog.data?.some((c) => c.slug === slug && c.status === "hot"),
+  const replay = session.mode === "replay";
+  const starlette = catalog.data?.find(
+    (c) => c.slug === "starlette" && (replay || c.status === "hot"),
+  );
+  const requiredLayers = Boolean(
+    (replay || session.mode === "live") &&
+      starlette &&
+      catalog.data?.some(
+        (c) =>
+          c.slug === "fastapi" &&
+          c.parent_id === starlette.id &&
+          (replay || c.status === "hot"),
+      ),
   );
   const isJudge = session.state?.kind === "judge";
   const mandate = session.state?.mandate;
@@ -241,16 +252,23 @@ export function Judge() {
           </div>
           <hr className="section-rule" />
           <h3>Global engine cache</h3>
+          {replay && (
+            <p className="help">
+              Cache flush requires the live GPU. Recorded workloads preserve the
+              captured cache state.
+            </p>
+          )}
           <label className="check-label">
             <input
               type="checkbox"
+              disabled={session.mode !== "live"}
               checked={confirmedFlush}
               onChange={(e) => setConfirmedFlush(e.target.checked)}
             />
             Clear the shared cache for all users and rewarm published contexts.
           </label>
           <button
-            disabled={!!busy || !confirmedFlush}
+            disabled={session.mode !== "live" || !!busy || !confirmedFlush}
             className="secondary"
             onClick={() => {
               setConfirmedFlush(false);
@@ -380,7 +398,11 @@ export function Judge() {
         <div>
           <small className="eyebrow">Step {step + 1} of 6</small>
           <h2>{steps[step][0]}</h2>
-          <p>{steps[step][1]}</p>
+          <p>
+            {step === 1 && replay
+              ? "Register Starlette and its FastAPI child to run the recorded workload."
+              : steps[step][1]}
+          </p>
         </div>
         {panel}
       </div>

@@ -6,7 +6,7 @@ export default function Page() {
   return (
     <>
       <PageTitle title="Publish context">
-        Register a maintainer, warm a licensed layer and verify its cache hits.
+        Register a maintainer and publish a licensed context layer.
       </PageTitle>
       <WorkspaceGate>
         <Publisher />

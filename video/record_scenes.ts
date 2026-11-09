@@ -18,7 +18,16 @@ async function readJson(page, endpoint) {
 const readState = (page) => readJson(page, "judge/state");
 const quietMark = async () => {};
 
-async function publishLayers(page, state, mark = quietMark) {
+async function publishLayers(
+  page,
+  state,
+  mark = quietMark,
+  { requireLive = false } = {},
+) {
+  const mode = (await readJson(page, "health")).mode;
+  if (requireLive && mode !== "live")
+    throw Error("The publication scene requires a live GPU probe.");
+  const replay = mode === "replay";
   for (const slug of ["starlette", "fastapi"]) {
     if (!state.publisher_receivers?.[slug])
       throw Error(
@@ -30,15 +39,28 @@ async function publishLayers(page, state, mark = quietMark) {
       .click();
     if (slug === "fastapi")
       await expect(page.getByLabel("Parent context")).not.toHaveValue("");
-    await page.getByRole("button", { name: "Publish and warm" }).click();
+    await page
+      .getByRole("button", {
+        name: replay ? "Register for replay" : "Publish and warm",
+      })
+      .click();
     const probe = page
       .locator("section")
-      .filter({ has: page.getByRole("heading", { name: "Engine probe" }) })
+      .filter({
+        has: page.getByRole("heading", {
+          name: replay ? "Recorded workload" : "Engine probe",
+        }),
+      })
       .last();
     await expect(probe).toContainText(new RegExp(slug, "i"));
-    await expect(probe.locator(".tag")).toHaveText("hot", { timeout: 90000 });
-    await expect(probe.locator(".probe-result")).toContainText("%");
-    await mark(slug + "-hot");
+    if (replay) {
+      await expect(probe.locator(".tag")).toHaveText("Registered for replay");
+      await mark(slug + "-registered-for-replay");
+    } else {
+      await expect(probe.locator(".tag")).toHaveText("hot", { timeout: 90000 });
+      await expect(probe.locator(".probe-result")).toContainText("%");
+      await mark(slug + "-hot");
+    }
   }
 }
 async function approve(
@@ -98,8 +120,9 @@ async function approve(
 }
 async function selectFastAPI(page) {
   const contexts = await readJson(page, "contexts");
+  const replay = (await readJson(page, "health")).mode === "replay";
   const published = contexts.find(
-    (c) => c.slug === "fastapi" && c.status === "hot",
+    (c) => c.slug === "fastapi" && (replay || c.status === "hot"),
   );
   if (!published)
     throw Error("Publish and warm FastAPI before requesting its task quote.");
@@ -343,7 +366,7 @@ const scenes = {
     await expect(page.getByText("Workspace open")).toBeVisible();
     const state = await readState(page);
     await go("/publish");
-    await publishLayers(page, state, mark);
+    await publishLayers(page, state, mark, { requireLive: true });
   },
   async S4({ page, go, mark }) {
     await go("/agent");

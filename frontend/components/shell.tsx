@@ -39,6 +39,7 @@ const nav = [
 ];
 const Session = createContext<{
   state: State | null;
+  mode?: string;
   error: string;
   loading: boolean;
   start: (kind: "judge" | "user", switchBack?: boolean) => Promise<void>;
@@ -155,7 +156,9 @@ export function Shell({ children }: { children: ReactNode }) {
     if (!state && pathname === "/judge") void refresh().catch(() => {});
   }, [pathname, Boolean(state), start, refresh]); // Only initialize once per workspace.
   return (
-    <Session.Provider value={{ state, error, loading, start, refresh }}>
+    <Session.Provider
+      value={{ state, mode: health.data?.mode, error, loading, start, refresh }}
+    >
       <Suspense>
         <RecordingMode />
       </Suspense>

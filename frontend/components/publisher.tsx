@@ -8,6 +8,7 @@ import { ActionLink, Empty, Failure, Skeleton, Tag } from "./ui";
 
 export function Publisher() {
   const session = useSession();
+  const replay = session.mode === "replay";
   const sources = useResource<Source[]>("sources"),
     catalog = useResource<ContextRow[]>("contexts", 5000);
   const [name, setName] = useState(""),
@@ -174,9 +175,18 @@ export function Publisher() {
             <div className="actions full">
               <button
                 className="primary"
-                disabled={busy || !source || (!!source.parent && !chosenParent)}
+                disabled={
+                  busy ||
+                  !session.mode ||
+                  !source ||
+                  (!!source.parent && !chosenParent)
+                }
               >
-                {busy ? "Processing…" : "Publish and warm"}
+                {busy
+                  ? "Processing…"
+                  : replay
+                    ? "Register for replay"
+                    : "Publish and warm"}
               </button>
             </div>
           </form>
@@ -186,14 +196,20 @@ export function Publisher() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h2>Engine probe</h2>
-            <p>The serving engine measures the reusable prefix.</p>
+            <h2>{replay ? "Recorded workload" : "Engine probe"}</h2>
+            <p>
+              {replay
+                ? "Register the licensed layers to use verified recorded workloads. Live warming and hit probes are unavailable."
+                : "The serving engine measures the reusable prefix."}
+            </p>
           </div>
           <Thermometer size={21} />
         </div>
         {!submitted ? (
           <Empty title="Awaiting publication">
-            Your measured hit ratio appears after warm-up.
+            {replay
+              ? "The registered layer will use the stored GPU measurement."
+              : "Your measured hit ratio appears after warm-up."}
           </Empty>
         ) : probe.error ? (
           <Failure error={probe.error} retry={probe.reload} />
@@ -203,11 +219,19 @@ export function Publisher() {
           <div className="stack">
             <div className="toolbar">
               <b>{probe.data.title}</b>
-              <Tag tone={probe.data.status === "hot" ? "good" : "warn"}>
-                {probe.data.status}
+              <Tag
+                tone={
+                  replay
+                    ? "neutral"
+                    : probe.data.status === "hot"
+                      ? "good"
+                      : "warn"
+                }
+              >
+                {replay ? "Registered for replay" : probe.data.status}
               </Tag>
             </div>
-            {probe.data.last_probe_hit_ratio != null ? (
+            {!replay && probe.data.last_probe_hit_ratio != null ? (
               <div className="probe-result">
                 <strong>
                   {(probe.data.last_probe_hit_ratio * 100).toFixed(2)}%
@@ -215,7 +239,13 @@ export function Publisher() {
                 <span>measured prefix hit ratio</span>
               </div>
             ) : (
-              <p role="status">Waiting for a completed probe.</p>
+              <p role="status">
+                {replay
+                  ? "Live probe unavailable. Recorded turns use the registered source chain."
+                  : probe.data.status === "cold"
+                    ? "The live probe did not verify a warm prefix."
+                    : "Waiting for a completed probe."}
+              </p>
             )}
             <small>
               Published layer · {count(probe.data.token_len)} tokens
@@ -224,7 +254,8 @@ export function Publisher() {
               <ActionLink href="/catalog" quiet>
                 View catalog
               </ActionLink>
-              {probe.data.can_manage !== false &&
+              {!replay &&
+                probe.data.can_manage !== false &&
                 probe.data.status !== "warming" && (
                   <button className="secondary" disabled={busy} onClick={warm}>
                     Warm again

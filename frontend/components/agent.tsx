@@ -322,7 +322,10 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
               >
                 {catalog.data?.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.title} · {c.publisher_name} · {c.status}
+                    {c.title} · {c.publisher_name} ·{" "}
+                    {health.data?.mode === "replay"
+                      ? "Recorded workload"
+                      : c.status}
                   </option>
                 ))}
               </select>

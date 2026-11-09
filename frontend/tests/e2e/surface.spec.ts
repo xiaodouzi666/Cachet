@@ -14,6 +14,7 @@ test("uses the real API through isolated browser workspaces and the settlement d
   await page.getByRole("link", { name: "Browse catalog" }).click();
   await expect(page.getByLabel("Filter contexts")).toBeVisible();
   const listing = await (await page.request.get("/api/contexts")).json();
+  const health = await (await page.request.get("/api/health")).json();
   if (listing.length) await expect(page.getByRole("grid")).toBeVisible();
   else await expect(page.getByText("No published contexts yet")).toBeVisible();
   const state = async () => (await page.request.get("/api/judge/state")).json();
@@ -33,7 +34,10 @@ test("uses the real API through isolated browser workspaces and the settlement d
     await expect(page.getByLabel("Parent context")).not.toHaveValue("");
   } else {
     await expect(
-      page.getByRole("button", { name: "Publish and warm" }),
+      page.getByRole("button", {
+        name:
+          health.mode === "replay" ? "Register for replay" : "Publish and warm",
+      }),
     ).toBeDisabled();
   }
   await page.getByRole("link", { name: "Judge mode", exact: true }).click();
@@ -45,7 +49,25 @@ test("uses the real API through isolated browser workspaces and the settlement d
   await expect(
     page.getByRole("button", { name: /Exercise the controls/ }),
   ).toBeEnabled();
+  if (health.mode === "replay") {
+    await page.getByRole("button", { name: /Publish the layers/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "Recorded workload" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Live warming and hit probes are unavailable/),
+    ).toBeVisible();
+    // The fresh judge must register both licensed layers before proceeding.
+    await expect(
+      page.getByRole("button", { name: "Continue to authorization" }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("PayPal receiver email")).toHaveValue("");
+  }
   await page.getByRole("button", { name: /Exercise the controls/ }).click();
+  if (health.mode === "replay")
+    await expect(
+      page.getByRole("checkbox", { name: /Clear the shared cache/ }),
+    ).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Clear cache (test)" }),
   ).toBeDisabled();
