@@ -1,43 +1,167 @@
-"""Replay only attested, shareable built-in coding sessions. Payments are always live."""
+"""Validate checked-in GPU evidence before allowing it to drive a billed replay."""
 import hashlib
 import json
-from pathlib import Path
+import math
+import re
+from datetime import datetime
 
-from backend.app.config import ROOT, sources
-from backend.app.agents.tasks import STEPS, TASKS
+from backend.app.agents.tasks import STEPS, TASKS, turn_question
+from backend.app.config import ROOT, manifest, sources
+from backend.app.gateway.prompt_builder import END, SYSTEM, Prefix, dialogue, token_hash
 
 DIRECTORY = ROOT / "backend/app/replay/traces"
+SCHEMA = 2
+HEX256 = re.compile("[0-9a-f]{64}")
+QUOTE_FIELDS = {
+    "decision", "buy_micros", "compute_micros", "cold_ttft_ms", "warm_ttft_ms",
+    "turns", "tokens", "cold_fraction",
+}
 
 
-def signature(task_id, buy):
-    slug, text = TASKS[task_id]
-    spec = [text, STEPS, buy, [(s, d["ids_sha256"]) for s,d in sources().items()]]
-    return hashlib.sha256(json.dumps(spec,ensure_ascii=False).encode()).hexdigest()
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
 
 
 def path(task_id, buy):
-    if task_id not in TASKS:
-        raise ValueError("Only recorded built-in tasks support replay")
+    require(task_id in TASKS and type(buy) is bool, "Only built-in GPU sessions support replay")
     return DIRECTORY / f"{task_id}-{'buy' if buy else 'compute'}.json"
 
 
-def load(task_id, buy):
-    data = json.loads(path(task_id,buy).read_text())
-    if (data["signature"] != signature(task_id,buy) or data["task_id"] != task_id
-            or data["buy"] is not buy or len(data["turns"]) != len(STEPS)):
-        raise ValueError("Recorded session differs from the current task and contexts")
-    for t in data["turns"]:
-        if (len(t["input_hash"]) != 64 or not t["text"] or not 0 <= t["cached_tokens"] <= t["prompt_tokens"]
-                or t["output_tokens"] <= 0 or t["ttft_ms"] <= 0):
-            raise ValueError("Incomplete GPU recording")
-    return data
+def layers(task_id):
+    slug = TASKS[task_id][0]
+    by_slug = sources()
+    chain = []
+    while slug:
+        row = by_slug[slug]
+        source = manifest()["projects"][slug]
+        raw = (ROOT / row["text_path"]).read_bytes()
+        require(digest(raw) == row["text_sha256"], "Licensed source differs from the recording manifest")
+        chain.append((slug, row["token_len"], row["ids_sha256"], source["revision"],
+                      manifest()["tokenizer"]["revision"]))
+        slug = row["parent"]
+    return list(reversed(chain))
+
+
+def signature(task_id, buy):
+    spec = [SCHEMA, TASKS[task_id], [turn_question(TASKS[task_id][1], i, step)
+            for i, step in enumerate(STEPS)], buy, SYSTEM, END, dialogue([("user", "<|"), ("assistant", "")]),
+            layers(task_id), manifest()["tokenizer"]]
+    return digest(json.dumps(spec, ensure_ascii=False, sort_keys=True).encode())
+
+
+def integer(value, minimum=0):
+    return type(value) is int and value >= minimum
+
+
+def finite(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def validate(record, task_id, buy, *, source_chain=None, request_quote=None):
+    """All checks are offline. The digest of the complete raw trace is checked in load()."""
+    require(type(record) is dict and record.get("schema") == SCHEMA
+            and integer(record.get("output_limit"), 1), "Unsupported GPU recording format or output limit")
+    chain = layers(task_id)
+    require(record.get("task_id") == task_id and record.get("buy") is buy
+            and record.get("source") == TASKS[task_id][0] and record.get("signature") == signature(task_id, buy)
+            and record.get("model") == manifest()["tokenizer"]["model_id"]
+            and type(record.get("tenant")) is str and re.fullmatch("[0-9a-f]{8}", record["tenant"]),
+            "Recorded session differs from its model, task or source specification")
+    stamp = datetime.fromisoformat(record["recorded_at"])
+    require(stamp.utcoffset() is not None, "Recording timestamp needs a timezone")
+    if source_chain is not None:
+        require(list(map(tuple, source_chain)) == chain, "Published context chain differs from this recording")
+    q = record["quote"]
+    require(type(q) is dict and set(q) == QUOTE_FIELDS
+            and q["turns"] == len(STEPS) and q["tokens"] == sum(row[1] for row in chain)
+            and integer(q["buy_micros"]) and integer(q["compute_micros"])
+            and finite(q["cold_fraction"]) and 0 <= q["cold_fraction"] <= 1
+            and all(finite(q[k]) and q[k] > 0 for k in ("cold_ttft_ms", "warm_ttft_ms"))
+            and q["decision"] == ("buy" if buy else "compute")
+            and buy == (q["buy_micros"] <= q["compute_micros"]), "Invalid quote in GPU recording")
+    if request_quote is not None:
+        require(all(request_quote.get(k) == q[k] for k in QUOTE_FIELDS),
+                f"The selected quote differs from this GPU recording (recorded cold fraction {q['cold_fraction']}).")
+    turns = record["turns"]
+    require(type(turns) is list and len(turns) == len(STEPS), "Incomplete GPU session")
+    expected = ([("system", "system", None), *[("publisher", r[0], r[1]) for r in chain],
+                 ("private", "salt", None)] if buy else
+                [("private", "salt", None), ("private", "context", None),
+                 *[("private", "context", r[1]) for r in chain]])
+    expected.append(("private", "turns", None))
+    prior_spans = None
+    seen_inputs = set()
+    previous_prompt = 0
+    for i, turn in enumerate(turns, 1):
+        require(type(turn) is dict and turn.get("kind") == "result" and turn.get("mode") == "live"
+                and integer(turn.get("turn"), 1) and turn["turn"] == i
+                and isinstance(turn.get("text"), str) and turn["text"].strip()
+                and integer(turn.get("prompt_tokens"), previous_prompt + 1)
+                and integer(turn.get("cached_tokens")) and turn["cached_tokens"] <= turn["prompt_tokens"]
+                and integer(turn.get("output_tokens"), 1) and turn["output_tokens"] <= record["output_limit"]
+                and turn["prompt_tokens"] + record["output_limit"] <= manifest()["context_window"]
+                and all(finite(turn.get(k)) and turn[k] > 0 for k in ("engine_ttft_ms","ttft_ms","total_ms"))
+                and turn["engine_ttft_ms"] <= turn["ttft_ms"] <= turn["total_ms"]
+                and turn.get("fault_injected_ms") == 0
+                and type(turn.get("input_hash")) is str and HEX256.fullmatch(turn["input_hash"])
+                and turn["input_hash"] not in seen_inputs, "Invalid native GPU metering or turn order")
+        seen_inputs.add(turn["input_hash"])
+        previous_prompt = turn["prompt_tokens"]
+        spans = turn["spans"]
+        require(type(spans) is list and len(spans) == len(expected), "Recorded prompt has unexpected spans")
+        pos = 0
+        for span, (kind, owner, size) in zip(spans, expected):
+            require(type(span) is dict and set(span) == {"kind", "owner", "start", "end"}
+                    and span["kind"] == kind and span["owner"] == owner
+                    and integer(span["start"]) and span["start"] == pos and integer(span["end"], pos + 1)
+                    and (size is None or span["end"] - pos == size), "Invalid source attribution in recording")
+            pos = span["end"]
+        require(pos == turn["prompt_tokens"] and (prior_spans is None or spans[:-1] == prior_spans),
+                "Recorded source spans drift between turns")
+        prior_spans = spans[:-1]
+    return record
+
+
+def verify_inputs(engine, record):
+    """Rebuild the original input IDs from the licensed sources and previous GPU completions."""
+    task_id, buy = record["task_id"], record["buy"]
+    prefix = Prefix(engine, TASKS[task_id][0])
+    owners = {slug: slug for slug, _ in prefix.layers}
+    messages = []
+    for i, turn in enumerate(record["turns"]):
+        question = turn_question(TASKS[task_id][1], i, STEPS[i])
+        if i == 0:
+            question += "\nQuote: " + json.dumps(record["quote"], sort_keys=True)
+        messages.append(("user", question))
+        prompt = prefix.build(engine, owners, record["tenant"], messages, buy)
+        require(turn["spans"] == prompt.spans and turn["prompt_tokens"] == len(prompt.ids)
+                and turn["input_hash"] == token_hash(prompt.ids), "Reconstructed GPU input IDs do not match")
+        messages.append(("assistant", turn["text"]))
+
+
+def checked_json(raw, expected_sha256):
+    require(digest(raw) == expected_sha256, "GPU recording checksum mismatch")
+    return json.loads(raw)
+
+
+def load(task_id, buy, *, source_chain=None, request_quote=None):
+    location = path(task_id, buy)
+    try:
+        hashes = json.loads((DIRECTORY / "sha256.json").read_bytes())
+        raw = location.read_bytes()
+        record = checked_json(raw, hashes[location.name])
+        return validate(record, task_id, buy, source_chain=source_chain, request_quote=request_quote)
+    except (KeyError, TypeError, OverflowError, OSError) as exc:
+        raise ValueError("GPU recording or checksum manifest is missing or malformed") from exc
 
 
 def available():
     try:
-        for key in TASKS:
-            for buy in (True,False):
-                load(key,buy)
-        return True
-    except (FileNotFoundError,KeyError,ValueError):
+        return all(load(task_id, buy) for task_id in TASKS for buy in (True, False))
+    except ValueError:
         return False

@@ -1,4 +1,5 @@
 {
+  "schema": 2,
   "task_id": "route-class",
   "source": "starlette",
   "buy": false,
@@ -13,17 +14,20 @@
     "cold_fraction": 0.0
   },
   "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
-  "recorded_at": "2026-11-09T05:52:59.553981+00:00",
-  "signature": "48f5c8e30ff02cf5a7112662a0c22a248eb363f504fc31316080292032002a99",
+  "tenant": "bb916442",
+  "output_limit": 150,
+  "signature": "eb5856a714a49336db8e2810170cd0a6dbf7a7729409d106b2aeeda5325270a2",
   "turns": [
     {
       "kind": "result",
       "prompt_tokens": 12164,
       "cached_tokens": 0,
-      "ttft_ms": 2975.792,
-      "total_ms": 4159.893,
+      "ttft_ms": 2958.621,
+      "engine_ttft_ms": 2958.621,
+      "fault_injected_ms": 0.0,
+      "total_ms": 4137.733,
       "output_tokens": 150,
-      "text": "The chosen strategy involves prioritizing computation over cold starts, as indicated by the `decision: compute` and low `cold_fraction` (0.0). This approach minimizes the time spent on cold starts by reusing the warm state, which is more efficient for frequent requests. The tradeoff is that compute time is slightly higher, but this is offset by the reduced cold start latency, making it suitable for applications with high request frequency.\n\nSpecifically, the `warm_ttft_ms` (29.177) is much lower than the `cold_ttft_ms` (1743.186), indicating that warm state reuse is highly effective. The `compute_micros` (11992) is",
+      "text": "The chosen strategy involves prioritizing computation over cold starts, as indicated by the `decision: compute` and the significantly higher `compute_micros` (11992) compared to `cold_ttft_ms` (1743.186). This suggests that the system is optimized for frequent requests, minimizing the overhead of computation while ensuring quick responses. The tradeoff here is that the initial cold start time (`warm_ttft_ms` 29.177) is much shorter than the cold start time (`cold_ttft_ms` 1743.186), indicating that the system quickly warms up after the initial cold start, making subsequent requests faster.\n\nIn the context of Starlette routing",
       "turn": 1,
       "spans": [
         {
@@ -51,17 +55,19 @@
           "end": 12164
         }
       ],
-      "input_hash": "d82cbe1627a9c5f9cad2b8735406c6d827bdd63cdd576720acd4853cd4f59c59",
+      "input_hash": "c758aeb9cc1a8cc85dc97394113e910af35ea977d216067c8cfcbd5f88b98c41",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 12366,
       "cached_tokens": 12313,
-      "ttft_ms": 48.722,
-      "total_ms": 1240.385,
+      "ttft_ms": 47.331,
+      "engine_ttft_ms": 47.33,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1233.546,
       "output_tokens": 150,
-      "text": "### Feature Requirements:\n1. **Custom Route Class**: Implement a custom route class that can handle both HTTP and WebSocket requests.\n2. **Route Matching**: The custom route should match incoming requests based on the path and method.\n3. **Middleware Integration**: The custom route should support middleware for request handling.\n4. **Error Handling**: Include error handling for unmatched routes and invalid requests.\n\n### Measurable Acceptance Conditions:\n1. **Route Matching**: Verify that the custom route correctly matches incoming HTTP and WebSocket requests based on the path and method.\n2. **Middleware Execution**: Ensure that middleware is correctly applied to the request before it reaches the endpoint.\n3. **Error Handling**: Confirm that the custom route handles unmatched routes and invalid requests appropriately.\n4",
+      "text": "### Feature Requirements for Custom Route Class\n\n1. **Path Matching**: The custom route class should be able to match incoming requests based on a specified path.\n2. **HTTP Methods**: Support for specifying HTTP methods (e.g., GET, POST) that the route should handle.\n3. **Endpoint Handling**: Ability to handle both synchronous and asynchronous endpoints.\n4. **Middleware Support**: Integration with Starlette middleware for request processing.\n5. **Error Handling**: Custom error handling for specific exceptions or HTTP status codes.\n\n### Measurable Acceptance Conditions\n\n1. **Path Matching Test**:\n   - Given a route defined with a path `/user/{id:int}`, when a request is made to `/user/123`, the route should match",
       "turn": 2,
       "spans": [
         {
@@ -89,17 +95,19 @@
           "end": 12366
         }
       ],
-      "input_hash": "1e7e175943bc7082f7593c438d4cb0f88e9a1d3969fcd9a1be611773c6e33ccb",
+      "input_hash": "1442904a6563c94eea64a9f34628111bae6fa08ebb3e2d73a80413eab6df9eea",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 12570,
       "cached_tokens": 12515,
-      "ttft_ms": 47.676,
-      "total_ms": 1245.362,
+      "ttft_ms": 47.557,
+      "engine_ttft_ms": 47.556,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1240.116,
       "output_tokens": 150,
-      "text": "### Relevant Framework Classes in Starlette:\n\n1. **Router Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Manages a collection of routes and handles incoming requests by matching them to the appropriate route.\n\n2. **Route Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Represents a single route that can handle HTTP requests. It includes methods for matching requests and handling them.\n\n3. **WebSocketRoute Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Represents a single route that can handle WebSocket connections. It includes methods for matching WebSocket requests and handling them.\n\n4. **Middleware Class**:\n   - **",
+      "text": "### Relevant Framework Classes in Starlette\n\n1. **Router Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Manages a collection of routes and handles incoming requests by matching them to the appropriate route.\n\n2. **Route Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Represents a single route with a specific path and endpoint. Handles request matching and dispatching.\n\n3. **WebSocketRoute Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Similar to `Route`, but specifically for WebSocket connections.\n\n4. **Mount Class**:\n   - **Location**: `starlette/routing.py`\n   - **",
       "turn": 3,
       "spans": [
         {
@@ -127,17 +135,19 @@
           "end": 12570
         }
       ],
-      "input_hash": "fd98e67db92b999696211c13745a69ad244ab24bcc2256998e6c5501e1432e39",
+      "input_hash": "d44b374c352e6167cd60fa169ab21583992d5c8c1cb4fe9838bca9e4ed5fb2e0",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 12771,
       "cached_tokens": 12719,
-      "ttft_ms": 48.093,
-      "total_ms": 1251.547,
+      "ttft_ms": 47.903,
+      "engine_ttft_ms": 47.902,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1246.027,
       "output_tokens": 150,
-      "text": "### Request Path Tracing Through Starlette Classes:\n\n1. **Router Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Manages a collection of routes and handles incoming requests by matching them to the appropriate route.\n\n2. **Route Matching**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: The `matches` method in the `Route` class checks if the incoming request matches the defined route path and method.\n\n3. **Request Handling**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: If a match is found, the `handle` method in the `Route` class is called to process the request.\n\n4.",
+      "text": "### Tracing the Request Path Through Starlette Classes\n\n1. **Router Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Manages a collection of routes and handles incoming requests by matching them to the appropriate route.\n\n2. **Route Matching**:\n   - When a request arrives, the `Router` class checks the incoming `scope` to determine the type of request (HTTP, WebSocket, etc.).\n   - It then iterates through the routes to find a match using the `matches` method of each route.\n\n3. **Route Class**:\n   - **Location**: `starlette/routing.py`\n   - **Description**: Represents a single route with a specific path and endpoint.\n",
       "turn": 4,
       "spans": [
         {
@@ -165,17 +175,19 @@
           "end": 12771
         }
       ],
-      "input_hash": "79de3448534af76c9bdc451d7c4e09f6a4eb0270a174fe64947bca047cf01a01",
+      "input_hash": "28baa7673d187303eec1a97cf2c238c80ce4d845246c3fcfa9f2dd49b3341b75",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 12974,
       "cached_tokens": 12920,
-      "ttft_ms": 48.736,
-      "total_ms": 1257.0,
+      "ttft_ms": 48.208,
+      "engine_ttft_ms": 48.207,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1251.088,
       "output_tokens": 150,
-      "text": "### Design the Smallest Change to Add a Custom Route Class\n\n1. **Create a Custom Route Class**:\n   - **Class Name**: `CustomRoute`\n   - **Location**: `starlette/routing.py`\n\n2. **Implement the Custom Route Class**:\n   - **Inherit from**: `Route`\n   - **Override Methods**: `matches` and `handle`\n\n3. **Add Middleware Support**:\n   - **Override**: `__call__` to apply middleware\n\n4. **Register the Custom Route**:\n   - **In Router**: Add the custom route to the router's routes\n\n### Example Implementation\n\n```python\nfrom starlette.routing import Route\n\nclass CustomRoute(Route):\n    def __init__(self",
+      "text": "### Design the Smallest Change to Add a Custom Route Class\n\n1. **Create a Custom Route Class**:\n   - **Class Name**: `CustomRoute`\n   - **Location**: `starlette/routing.py`\n\n2. **Implement the `CustomRoute` Class**:\n   - **Path Matching**: Implement `matches` to match the request path.\n   - **Endpoint Handling**: Implement `handle` to process the request.\n   - **Middleware Support**: Ensure compatibility with Starlette middleware.\n\n3. **Integrate `CustomRoute` into the Router**:\n   - Add `CustomRoute` to the `Router`'s collection of routes.\n\n### Example Implementation\n\n```python\nfrom starlette.routing import BaseRoute, Match\n\n",
       "turn": 5,
       "spans": [
         {
@@ -203,17 +215,19 @@
           "end": 12974
         }
       ],
-      "input_hash": "cb1474b104245f83cfa1cb418244a57cf052baaee61abe8c74806039bffe4a79",
+      "input_hash": "f7bafed0225ad7f7dce9761166933fb5314b798485753b30dd32fd88dafa55ac",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 13173,
       "cached_tokens": 13123,
-      "ttft_ms": 49.607,
-      "total_ms": 1261.612,
+      "ttft_ms": 49.189,
+      "engine_ttft_ms": 49.188,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1256.214,
       "output_tokens": 150,
-      "text": "### Core Python Implementation for a Custom Route Class\n\n1. **Create a Custom Route Class**:\n   - **Class Name**: `CustomRoute`\n   - **Location**: `starlette/routing.py`\n\n2. **Implement the Custom Route Class**:\n   - **Inherit from**: `Route`\n   - **Override Methods**: `matches` and `handle`\n\n3. **Add Middleware Support**:\n   - **Override**: `__call__` to apply middleware\n\n4. **Register the Custom Route**:\n   - **In Router**: Add the custom route to the router's routes\n\n### Example Implementation\n\n```python\nfrom starlette.routing import Route\n\nclass CustomRoute(Route):\n    def __init__(self, path:",
+      "text": "### Core Python Implementation for a Custom Route Class\n\n1. **Create a Custom Route Class**:\n   - **Class Name**: `CustomRoute`\n   - **Location**: `starlette/routing.py`\n\n2. **Implement the `CustomRoute` Class**:\n   - **Path Matching**: Implement `matches` to match the request path.\n   - **Endpoint Handling**: Implement `handle` to process the request.\n   - **Middleware Support**: Ensure compatibility with Starlette middleware.\n\n```python\nfrom starlette.routing import BaseRoute, Match\n\nclass CustomRoute(BaseRoute):\n    def __init__(self, path: str, endpoint: Callable[[Request], Awaitable[Response] | Response]):\n        assert path.startswith(\"/\"), \"R",
       "turn": 6,
       "spans": [
         {
@@ -241,17 +255,19 @@
           "end": 13173
         }
       ],
-      "input_hash": "ce7d5fda1d46a14ac7ec5cd7ecb4eeb28a7288adc94237a6726628a0657467b6",
+      "input_hash": "418e53432109270e08215b9b9a62265be223e02a565ac484d4fd1f9f5c5dffeb",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 13376,
       "cached_tokens": 13322,
-      "ttft_ms": 49.659,
-      "total_ms": 1268.265,
+      "ttft_ms": 49.392,
+      "engine_ttft_ms": 49.391,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1263.236,
       "output_tokens": 150,
-      "text": "### Show How an Application Registers and Exercises the Custom Route Implementation\n\n1. **Register the Custom Route**:\n   - Define the custom route and register it with the router.\n\n2. **Exercise the Custom Route**:\n   - Create an application that uses the custom route and test it.\n\n### Example Implementation\n\n#### Define the Custom Route\n\n```python\nfrom starlette.routing import Route\n\nclass CustomRoute(Route):\n    def __init__(self, path: str, endpoint: Callable[[Request], Awaitable[Response]], name: str | None = None):\n        super().__init__(path, endpoint, name=name)\n\n    def matches(self, scope: Scope) -> tuple[Match, Scope]:\n        match, child_scope = super().matches",
+      "text": "### Show How an Application Registers and Exercises the Custom Route Implementation\n\n1. **Register the Custom Route**:\n   - Define the custom route and register it with the `Router`.\n\n2. **Exercise the Custom Route**:\n   - Create a test client to send requests to the custom route and verify the behavior.\n\n#### Example Code\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Router, Route\nfrom starlette.requests import Request\nfrom starlette.responses import PlainTextResponse\n\n# Define the custom route class\nclass CustomRoute(Route):\n    def __init__(self, path: str, endpoint: Callable[[Request], Awaitable[Response] | Response]):\n        assert path.startswith(\"/\"), \"Route path",
       "turn": 7,
       "spans": [
         {
@@ -279,17 +295,19 @@
           "end": 13376
         }
       ],
-      "input_hash": "c46ae708a566d5cc3dd2e4eb3194845244a8831a9314d47a9024eb7d5f44f6f2",
+      "input_hash": "f6dda70c6a6616b4d5101af0841ba41d26b2294bd3ac242bf2986b2c2304618e",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 13577,
       "cached_tokens": 13525,
-      "ttft_ms": 49.896,
-      "total_ms": 1276.976,
+      "ttft_ms": 49.95,
+      "engine_ttft_ms": 49.95,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1270.725,
       "output_tokens": 150,
-      "text": "### Write a Test for the Successful Path\n\nTo test the successful path for the custom route, we will use the `TestClient` from `starlette.testclient` to send a request to the custom route and verify the response.\n\n#### Example Test\n\n```python\nfrom starlette.testclient import TestClient\nfrom starlette.routing import Router\nfrom starlette.requests import Request\nfrom starlette.responses import PlainTextResponse\n\n# Define the custom route\nclass CustomRoute(Route):\n    def __init__(self, path: str, endpoint: Callable[[Request], Awaitable[Response]], name: str | None = None):\n        super().__init__(path, endpoint, name=name)\n\n    def matches(self, scope: Scope) -> tuple",
+      "text": "### Write a Test for the Successful Path\n\n1. **Define the Custom Route**:\n   - Create a custom route class that matches a specific path and handles the request.\n\n2. **Register the Custom Route**:\n   - Add the custom route to a `Router`.\n\n3. **Create a Test Client**:\n   - Use a test client to send a request to the custom route and verify the response.\n\n#### Example Code\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Router, Route\nfrom starlette.requests import Request\nfrom starlette.responses import PlainTextResponse\nfrom starlette.testclient import TestClient\n\n# Define the custom route class\nclass CustomRoute(Route):\n    def __init__(",
       "turn": 8,
       "spans": [
         {
@@ -317,17 +335,19 @@
           "end": 13577
         }
       ],
-      "input_hash": "cc8fced9b128a0ca1f4d0a080940c6ab515f922087db0ef50339a82c23154da7",
+      "input_hash": "e2e5b905e078add2afa1a933641573e700459936934257bdcce62eaed8c0ae23",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 13783,
       "cached_tokens": 13726,
-      "ttft_ms": 50.524,
-      "total_ms": 1281.921,
+      "ttft_ms": 51.172,
+      "engine_ttft_ms": 51.171,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1276.61,
       "output_tokens": 150,
-      "text": "### Write a Test for an Edge Case and Explain the Expected Behavior\n\n#### Edge Case: Handling a Request with an Invalid Path\n\n**Expected Behavior**: The application should return a 404 Not Found response when the path does not match any registered routes.\n\n#### Example Test\n\n```python\nfrom starlette.testclient import TestClient\nfrom starlette.routing import Router\nfrom starlette.requests import Request\nfrom starlette.responses import PlainTextResponse\n\n# Define the custom route\nclass CustomRoute(Route):\n    def __init__(self, path: str, endpoint: Callable[[Request], Awaitable[Response]], name: str | None = None):\n        super().__init__(path, endpoint, name=name)\n\n    def matches(self, scope",
+      "text": "### Write a Test for an Edge Case and Explain the Expected Behavior\n\n#### Edge Case: Handling a Request with an Invalid Path\n\n1. **Define the Custom Route**:\n   - Create a custom route that matches a specific path and handles the request.\n\n2. **Register the Custom Route**:\n   - Add the custom route to a `Router`.\n\n3. **Create a Test Client**:\n   - Use a test client to send a request to an invalid path and verify the expected behavior (e.g., 404 Not Found).\n\n#### Example Code\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Router, Route\nfrom starlette.requests import Request\nfrom starlette.responses import PlainTextResponse",
       "turn": 9,
       "spans": [
         {
@@ -355,17 +375,19 @@
           "end": 13783
         }
       ],
-      "input_hash": "c9e76829abc70e2aee3a7bf28c04b845bd0c73ac5a0423cfa98e37389fb28d70",
+      "input_hash": "da856a56b78b5cb28a7819e9fcf830303fc755845553df26747197345aefb39a",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 13992,
       "cached_tokens": 13932,
-      "ttft_ms": 50.815,
-      "total_ms": 1287.507,
+      "ttft_ms": 50.823,
+      "engine_ttft_ms": 50.823,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1281.802,
       "output_tokens": 150,
-      "text": "### Review and Summarize the Implementation\n\n#### Custom Route Class Implementation\n\n1. **Define the Custom Route Class**:\n   - **Class Name**: `CustomRoute`\n   - **Location**: `starlette/routing.py`\n\n2. **Implement the Custom Route Class**:\n   - **Inherit from**: `Route`\n   - **Override Methods**: `matches` and `handle`\n\n3. **Add Middleware Support**:\n   - **Override**: `__call__` to apply middleware\n\n4. **Register the Custom Route**:\n   - **In Router**: Add the custom route to the router's routes\n\n#### Example Implementation\n\n```python\nfrom starlette.routing import Route\n\nclass CustomRoute(Route):\n    def __init",
+      "text": "### Review and Summarize the Implementation\n\n#### Custom Route Class Implementation\n\n1. **Define the Custom Route Class**:\n   - Create a custom route class that matches a specific path and handles the request.\n\n```python\nfrom starlette.routing import BaseRoute, Match\n\nclass CustomRoute(BaseRoute):\n    def __init__(self, path: str, endpoint: Callable[[Request], Awaitable[Response] | Response]):\n        assert path.startswith(\"/\"), \"Route path must start with '/'\"\n        self.path = path\n        self.endpoint = endpoint\n\n    def matches(self, scope: Scope) -> tuple[Match, Scope]:\n        path_params: dict[str, Any]\n        if scope[\"type\"] == \"http\":\n            route_path",
       "turn": 10,
       "spans": [
         {
@@ -393,8 +415,9 @@
           "end": 13992
         }
       ],
-      "input_hash": "9bd788d3cb6f69585ed6e8690b28d8cc0ab960f9a671297b22bb75d50d7d4513",
+      "input_hash": "f0883b7e7c2377eba42561eb31b6af272da239b4fb41f6b5b3e9e730e8ae8a1f",
       "mode": "live"
     }
-  ]
+  ],
+  "recorded_at": "2026-11-09T06:12:51.561726+00:00"
 }

@@ -1,4 +1,5 @@
 {
+  "schema": 2,
   "task_id": "rate-limit",
   "source": "fastapi",
   "buy": true,
@@ -13,17 +14,20 @@
     "cold_fraction": 0.25
   },
   "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
-  "recorded_at": "2026-11-09T05:52:03.468968+00:00",
-  "signature": "67dda6882193d9fdc52544172dbe60186b0dfb7bcef957082635f97bf39803d9",
+  "tenant": "e15d7986",
+  "output_limit": 150,
+  "signature": "a112a286abce21dd43622a4a3bd6a459a9dfd74512c75e910854921771307d7a",
   "turns": [
     {
       "kind": "result",
       "prompt_tokens": 26071,
       "cached_tokens": 25913,
-      "ttft_ms": 97.867,
-      "total_ms": 1656.492,
+      "ttft_ms": 97.182,
+      "engine_ttft_ms": 97.181,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1654.335,
       "output_tokens": 150,
-      "text": "The tradeoff between the two inference options involves balancing between cold and warm starts. The chosen strategy prioritizes efficiency and speed:\n\n1. **Cold Start vs Warm Start**:\n   - **Cold Start**: Takes 8431.807 ms to initialize, with a compute time of 84175 micros and a buy micros of 38850.\n   - **Warm Start**: Takes only 69.076 ms to initialize, with a compute time of 84175 micros and a buy micros of 0.\n\n2. **Tradeoff**:\n   - **Efficiency**: Warm starts are significantly faster, reducing overall latency.\n   - **Resource Usage",
+      "text": "The tradeoff between the two inference options involves balancing between cold and warm starts. The chosen strategy prioritizes efficiency and speed:\n\n1. **Cold Start vs Warm Start**:\n   - **Cold Start**: Takes 8431.807 ms to initialize, with a compute time of 84175 micros and a buy micros of 38850. This is slower and more resource-intensive.\n   - **Warm Start**: Takes only 69.076 ms, with a compute time of 84175 micros and a buy micros of 38850. This is much faster and more efficient.\n\n2. **Tradeoff**:\n   - **",
       "turn": 1,
       "spans": [
         {
@@ -57,17 +61,19 @@
           "end": 26071
         }
       ],
-      "input_hash": "9388ad5bdc9aca09092bc565087204e88319ed37b6f7edebc88376c2295b4980",
+      "input_hash": "9a96d042db134d77d0158cc4cc259429dcdd5a72ec48767df1fb7bd18567bc58",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 26271,
       "cached_tokens": 26220,
-      "ttft_ms": 78.356,
-      "total_ms": 1639.636,
+      "ttft_ms": 77.046,
+      "engine_ttft_ms": 77.045,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1634.026,
       "output_tokens": 150,
-      "text": "### Feature Requirements and Measurable Acceptance Conditions for Rate-Limiting Middleware\n\n#### Feature Requirements:\n1. **Limit Requests Per IP**: Limit the number of requests an IP can make within a specified time window.\n2. **Track Request Counts**: Maintain a count of requests per IP.\n3. **Enforce Rate Limits**: Block or throttle requests exceeding the rate limit.\n4. **Logging**: Log rate-limiting events for auditing and debugging.\n\n#### Measurable Acceptance Conditions:\n1. **Request Count Tracking**:\n   - Verify that the middleware correctly tracks the number of requests per IP.\n2. **Rate Limit Enforcement**:\n   - Ensure that requests exceeding the rate limit are blocked or throttled.\n3. **Logging**:\n  ",
+      "text": "### Feature Requirements and Measurable Acceptance Conditions for Rate-Limiting Middleware\n\n#### Feature Requirements:\n1. **Limit Requests Per IP**: Limit the number of requests an IP can make within a specified time window.\n2. **Track IP Addresses**: Maintain a record of IP addresses and their request counts.\n3. **Enforce Limits**: Block or throttle requests when the limit is exceeded.\n4. **Logging**: Log rate-limiting events for auditing and debugging.\n\n#### Measurable Acceptance Conditions:\n1. **Request Count Tracking**:\n   - Verify that the middleware correctly tracks the number of requests per IP.\n2. **Rate Limit Enforcement**:\n   - Ensure that requests exceeding the limit are blocked or throttled.\n3. **Logging**",
       "turn": 2,
       "spans": [
         {
@@ -101,17 +107,19 @@
           "end": 26271
         }
       ],
-      "input_hash": "07086b4a3dad57da5c7782e8d3a5a1c89cec2e9203cb3c0b8b9f1b71dc3bd854",
+      "input_hash": "1aceef162aabb6ab8ed4ae5bd89d1a0d19bb0f5f4818015d68debe67e3d625f5",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 26473,
       "cached_tokens": 26420,
-      "ttft_ms": 78.343,
-      "total_ms": 1643.994,
+      "ttft_ms": 77.677,
+      "engine_ttft_ms": 77.677,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1639.32,
       "output_tokens": 150,
-      "text": "### Relevant Framework Classes in the Supplied Repository Context\n\n1. **Starlette Middleware Framework**:\n   - **Class**: `starlette.middleware.base.Middleware`\n   - **File**: `starlette/middleware/base.py`\n\n2. **FastAPI Middleware Framework**:\n   - **Class**: `fastapi.middleware.base.BaseHTTPMiddleware`\n   - **File**: `fastapi/middleware/base.py`\n\n3. **Rate-Limiting Middleware**:\n   - **Class**: `ContentSizeLimitMiddleware`\n   - **File**: `docs_src/custom_request_and_route/tutorial003_py310.py`\n\n4. **FastAPI Router**:\n   - **Class**: `APIRouter`\n   - **File**: `fastapi",
+      "text": "### Relevant Framework Classes in the Supplied Repository Context\n\n1. **Starlette Middleware Framework**:\n   - **`starlette/middleware/base.py`**: Contains the `BaseHTTPMiddleware` class.\n   - **`starlette/middleware/body_limit.py`**: Contains the `RequestBodyLimitMiddleware` class.\n   - **`starlette/middleware/__init__.py`**: Contains the `Middleware` class.\n\n2. **FastAPI Middleware Framework**:\n   - **`fastapi/middleware/asyncexitstack.py`**: Contains the `AsyncExitStackMiddleware` class.\n   - **`fastapi/routing.py`**: Contains the `APIRoute` and `BaseHTTPMiddleware` classes.\n\n3. **Custom Middleware**:\n",
       "turn": 3,
       "spans": [
         {
@@ -145,17 +153,19 @@
           "end": 26473
         }
       ],
-      "input_hash": "275aca37c1f32b27ebf0135964f465ad74bee8a31ef4cab83b06e6bc9aa0758f",
+      "input_hash": "fa8cafe9c8d53a780dac1d9d986f0835f94ddda44e633b05f6cc5e09a44f5de0",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 26671,
-      "cached_tokens": 26571,
-      "ttft_ms": 90.355,
-      "total_ms": 1663.2,
+      "prompt_tokens": 26672,
+      "cached_tokens": 26622,
+      "ttft_ms": 78.186,
+      "engine_ttft_ms": 78.185,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1647.857,
       "output_tokens": 150,
-      "text": "### Tracing the Request Path Through Relevant Classes\n\n1. **Request**:\n   - Enters the FastAPI app.\n   - Routes the request to the appropriate endpoint.\n\n2. **APIRouter**:\n   - Handles routing and middleware.\n   - Calls the `get_route_handler` method to get the request handler.\n\n3. **BaseHTTPMiddleware**:\n   - Wraps the request handler with middleware.\n   - Calls the `dispatch` function to handle rate-limiting.\n\n4. **ContentSizeLimitMiddleware**:\n   - Checks the content size of the request.\n   - Raises an HTTPException if the content size exceeds the limit.\n\n5. **Request Handler**:\n   - Processes the request if rate-limiting is passed.\n\n### Example",
+      "text": "### Tracing the Request Path Through Relevant Classes\n\n1. **Request Initialization**:\n   - **`Request`**: The request object is created when a client sends a request to the FastAPI app.\n\n2. **Middleware Handling**:\n   - **`BaseHTTPMiddleware`**: Handles the middleware logic.\n   - **`APIRoute`**: Manages the route-specific middleware and request handling.\n\n3. **Rate-Limiting Middleware**:\n   - **`ContentSizeLimitMiddleware`**: Custom middleware for limiting content size.\n   - **`AsyncExitStackMiddleware`**: Manages asynchronous context stacks for closing files.\n\n4. **Request Processing**:\n   - **`get_request_handler`**: Builds the request handler function.\n   -",
       "turn": 4,
       "spans": [
         {
@@ -186,20 +196,22 @@
           "kind": "private",
           "owner": "turns",
           "start": 25925,
-          "end": 26671
+          "end": 26672
         }
       ],
-      "input_hash": "7843100f87fffa098929bea6d3b38b357440e6d2a9c133cbdd0d1c1943ecb3d9",
+      "input_hash": "51e04ddae7833570d9ef1ee5e4a5240abfbe62c5c0bb2d5903adf1a1aabc6266",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 26872,
-      "cached_tokens": 26820,
-      "ttft_ms": 80.867,
-      "total_ms": 1659.414,
+      "cached_tokens": 26766,
+      "ttft_ms": 92.453,
+      "engine_ttft_ms": 92.452,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1666.974,
       "output_tokens": 150,
-      "text": "### Designing the Smallest Change for Rate-Limiting Middleware\n\n1. **Create a Rate-Limiting Middleware Class**:\n   - Extend `BaseHTTPMiddleware` or `starlette.middleware.base.Middleware`.\n\n2. **Implement Rate-Limiting Logic**:\n   - Track requests per IP.\n   - Enforce rate limits.\n   - Log rate-limiting events.\n\n3. **Integrate Middleware into FastAPI App**:\n   - Add the middleware to the app using `app.add_middleware`.\n\n### Example Implementation\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom starlette.requests import Request\nfrom starlette.responses import Response\nfrom typing import Dict, Any",
+      "text": "### Designing the Smallest Change for Rate-Limiting Middleware\n\n1. **Create a Rate-Limiting Middleware Class**:\n   - Extend `BaseHTTPMiddleware` to implement rate-limiting logic.\n\n2. **Implement Rate-Limiting Logic**:\n   - Use a dictionary to track request counts per IP.\n   - Define a time window and limit for requests.\n\n3. **Integrate Middleware into FastAPI App**:\n   - Add the middleware to the FastAPI app using `app.add_middleware`.\n\n### Example Implementation\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom typing import Dict, Union\nfrom starlette.types import ASGIApp, Scope, Receive",
       "turn": 5,
       "spans": [
         {
@@ -233,17 +245,19 @@
           "end": 26872
         }
       ],
-      "input_hash": "a73ff369448eaab33441ec0b094166f1c0fe9727143ab3741660795ef0464c72",
+      "input_hash": "77d24507b104a437cd438979df2df85385b6d7905c638f8f5b8863351851281a",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 27069,
       "cached_tokens": 27021,
-      "ttft_ms": 134.471,
-      "total_ms": 1721.467,
+      "ttft_ms": 75.816,
+      "engine_ttft_ms": 75.815,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1655.458,
       "output_tokens": 150,
-      "text": "### Core Python Implementation for Rate-Limiting Middleware\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom starlette.requests import Request\nfrom starlette.responses import Response\nfrom typing import Dict, Any\nfrom collections import defaultdict\nfrom time import time\n\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: FastAPI, limit: int = 100, window: int = 60):\n        super().__init__(app)\n        self.limit = limit\n        self.window = window\n        self.request_counts: Dict[str, float] = defaultdict(float)\n\n    async def dispatch(self, request: Request, call_next: Callable[[",
+      "text": "### Core Python Implementation for Rate-Limiting Middleware\n\n1. **Create the Rate-Limiting Middleware Class**:\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom typing import Dict, Union\nfrom starlette.types import ASGIApp, Scope, Receive, Send\nfrom datetime import datetime, timedelta\n\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: ASGIApp, limit: int = 100, window: timedelta = timedelta(minutes=1)):\n        super().__init__(app)\n        self.limit = limit\n        self.window = window\n        self.request_counts: Dict[str, Dict[str, Union[int, datetime]]",
       "turn": 6,
       "spans": [
         {
@@ -277,17 +291,19 @@
           "end": 27069
         }
       ],
-      "input_hash": "1f06ad657451f3df83eba5a0ce03a9a21358562e48795759ff8f477d1a157dbb",
+      "input_hash": "1e0db5442ab74731993c526106fcc9bdfb736070885f51f909550ee8c1ad2c3b",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 27270,
       "cached_tokens": 27218,
-      "ttft_ms": 81.769,
-      "total_ms": 1669.44,
+      "ttft_ms": 79.646,
+      "engine_ttft_ms": 79.645,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1663.826,
       "output_tokens": 150,
-      "text": "### Registering and Exercising the Rate-Limiting Middleware\n\n1. **Register the Middleware**:\n   - Add the rate-limiting middleware to the FastAPI app.\n\n2. **Exercise the Middleware**:\n   - Test the middleware by making requests to the app.\n\n### Example Implementation\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom starlette.requests import Request\nfrom starlette.responses import Response\nfrom typing import Dict, Any\nfrom collections import defaultdict\nfrom time import time\n\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: FastAPI, limit: int = 100, window: int = 60",
+      "text": "### Show How an Application Registers and Exercises the Rate-Limiting Middleware\n\n1. **Register the Middleware**:\n   - Add the rate-limiting middleware to the FastAPI app.\n\n2. **Exercise the Middleware**:\n   - Test the middleware by making requests to the app.\n\n### Example Implementation\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom typing import Dict, Union\nfrom starlette.types import ASGIApp, Scope, Receive, Send\nfrom datetime import datetime, timedelta\n\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: ASGIApp, limit: int = 100, window: timedelta = timedelta(minutes=",
       "turn": 7,
       "spans": [
         {
@@ -321,17 +337,19 @@
           "end": 27270
         }
       ],
-      "input_hash": "18dacfe168fca2e7681846821daed8c0a0b510410e50b13cf14a1d6d06af0432",
+      "input_hash": "db6c06ab4933a04a025d17e6dc3ef40db019eedfa277d2c003fe38c9329fa2ac",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 27469,
       "cached_tokens": 27419,
-      "ttft_ms": 80.409,
-      "total_ms": 1674.153,
+      "ttft_ms": 81.864,
+      "engine_ttft_ms": 81.864,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1670.664,
       "output_tokens": 150,
-      "text": "### Test for Successful Path\n\n1. **Setup**:\n   - Create a FastAPI app with the rate-limiting middleware.\n   - Define a test endpoint.\n\n2. **Test Successful Path**:\n   - Make multiple requests within the rate limit.\n   - Verify that the requests are processed successfully.\n\n### Example Test\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom starlette.requests import Request\nfrom starlette.responses import Response\nfrom typing import Dict, Any\nfrom collections import defaultdict\nfrom time import time\nimport pytest\nfrom fastapi.testclient import TestClient\n\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: FastAPI",
+      "text": "### Write a Test for the Successful Path\n\n1. **Set Up the Test Environment**:\n   - Use `TestClient` to simulate HTTP requests.\n\n2. **Test Successful Requests**:\n   - Ensure that requests within the rate limit are processed successfully.\n\n### Example Test\n\n```python\nfrom fastapi.testclient import TestClient\nfrom fastapi import FastAPI\nfrom starlette.responses import JSONResponse\nfrom datetime import datetime, timedelta\n\napp = FastAPI()\n\n@app.get(\"/\")\nasync def read_root():\n    return {\"message\": \"Hello World\"}\n\n# Add rate-limiting middleware\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: ASGIApp, limit: int = 100,",
       "turn": 8,
       "spans": [
         {
@@ -365,17 +383,19 @@
           "end": 27469
         }
       ],
-      "input_hash": "8b2ea97241f4b7001bbb45c1715593f4b0ba6ad488d73f4ee8d72c35c1df4447",
+      "input_hash": "9faa843e43eaefe4f27b2233d62f0960daacae772dabe53816d46826830cf5d5",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 27673,
       "cached_tokens": 27618,
-      "ttft_ms": 81.232,
-      "total_ms": 1682.058,
+      "ttft_ms": 80.33,
+      "engine_ttft_ms": 80.329,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1677.568,
       "output_tokens": 150,
-      "text": "### Test for Edge Case: Exceeding Rate Limit\n\n1. **Setup**:\n   - Create a FastAPI app with the rate-limiting middleware.\n   - Define a test endpoint.\n\n2. **Test Edge Case**:\n   - Make requests exceeding the rate limit.\n   - Verify that the requests are blocked or throttled.\n\n### Example Test\n\n```python\nfrom fastapi import FastAPI, Request\nfrom fastapi.middleware.base import BaseHTTPMiddleware\nfrom starlette.requests import Request\nfrom starlette.responses import Response, JSONResponse\nfrom typing import Dict, Any\nfrom collections import defaultdict\nfrom time import time\nimport pytest\nfrom fastapi.testclient import TestClient\n\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n   ",
+      "text": "### Write a Test for an Edge Case and Explain the Expected Behavior\n\n1. **Set Up the Test Environment**:\n   - Use `TestClient` to simulate HTTP requests.\n\n2. **Test Edge Case**:\n   - Ensure that requests exceeding the rate limit are handled correctly.\n\n### Example Test\n\n```python\nfrom fastapi.testclient import TestClient\nfrom fastapi import FastAPI\nfrom starlette.responses import JSONResponse\nfrom datetime import datetime, timedelta\nfrom typing import Dict, Union\n\napp = FastAPI()\n\n@app.get(\"/\")\nasync def read_root():\n    return {\"message\": \"Hello World\"}\n\n# Add rate-limiting middleware\nclass RateLimitingMiddleware(BaseHTTPMiddleware):\n    def __init__(self, app: AS",
       "turn": 9,
       "spans": [
         {
@@ -409,17 +429,19 @@
           "end": 27673
         }
       ],
-      "input_hash": "f7bffc65cd0700adb06797945dd3bf75f2f3dff8f6c7852b3ba23c785e151e95",
+      "input_hash": "70fda14170099a075ae0d894db7c098901f555d66a5ae9d8027a653433f5ce48",
       "mode": "live"
     },
     {
       "kind": "result",
       "prompt_tokens": 27880,
       "cached_tokens": 27822,
-      "ttft_ms": 81.084,
-      "total_ms": 1689.127,
+      "ttft_ms": 81.819,
+      "engine_ttft_ms": 81.818,
+      "fault_injected_ms": 0.0,
+      "total_ms": 1685.438,
       "output_tokens": 150,
-      "text": "### Review and Summarize the Rate-Limiting Middleware Implementation\n\n1. **Implementation**:\n   - Created a `RateLimitingMiddleware` class that extends `BaseHTTPMiddleware`.\n   - Implemented rate-limiting logic to track requests per IP and enforce limits.\n   - Added logging for rate-limiting events.\n\n2. **Test Cases**:\n   - **Successful Path**:\n     - Made multiple requests within the rate limit.\n     - Verified successful processing.\n   - **Edge Case**:\n     - Made requests exceeding the rate limit.\n     - Verified that the requests are blocked or throttled.\n\n3. **Summary**:\n   - The `RateLimitingMiddleware` class effectively limits the number of requests per IP within a specified time",
+      "text": "### Review and Summarize the Rate-Limiting Middleware Implementation\n\n1. **Implementation**:\n   - Created a `RateLimitingMiddleware` class that extends `BaseHTTPMiddleware`.\n   - Used a dictionary to track request counts per IP within a specified time window.\n   - Added the middleware to the FastAPI app.\n\n2. **Tests**:\n   - Wrote tests to ensure successful requests are processed within the rate limit.\n   - Wrote an edge case test to ensure requests exceeding the rate limit are handled correctly.\n\n3. **Summary**:\n   - The `RateLimitingMiddleware` class effectively limits the number of requests per IP within a specified time window.\n   - The middleware is registered with the FastAPI app and tested",
       "turn": 10,
       "spans": [
         {
@@ -453,8 +475,9 @@
           "end": 27880
         }
       ],
-      "input_hash": "63c639dbaa2461487f1db927556d2454f3acd31067df96d225f15a2a4af6aa44",
+      "input_hash": "e83d127e2b4a5a045a5742387bdfbe4af4f38128616ec9dbaf13f6f01f028c29",
       "mode": "live"
     }
-  ]
+  ],
+  "recorded_at": "2026-11-09T06:11:55.043715+00:00"
 }
