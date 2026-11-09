@@ -114,7 +114,11 @@ make verify-full
 make e2e
 ```
 
-`make verify` runs unit and non-PayPal integration tests. With a configured GPU it includes real generation, cache flushes and tenant isolation. `make verify-full` also requires sandbox credentials and provisioned accounts. `make e2e` uses real provider operations in a dedicated judge workspace. See [the sandbox sequence and acceptance instructions](docs/pricing.md). To reproduce the five-band benchmark use `.venv-sglang/bin/python -m bench.calibrate`. Local charts and checked-in traces do not require GPU installation to inspect.
+`make verify` runs unit and non-PayPal integration tests. With a configured GPU it includes real generation, cache flushes and tenant isolation. Run it with exclusive access to that inference server. `make verify-full` also requires sandbox credentials and provisioned accounts.
+
+`make e2e` uses one judge workspace and real sandbox payments. If either publisher is below the payout minimum, the driver first runs paid ten-turn framework questions on the GPU to earn eligible royalties. These preparation sessions follow the same SLA, refunds and hourly limits as any other run. Their charges and balances are recorded separately; only the three built-in coding sessions with fault injection, refunds, two payouts and successful reconciliation count toward acceptance. See [the sandbox sequence and acceptance instructions](docs/pricing.md).
+
+To reproduce the five-band benchmark use `.venv-sglang/bin/python -m bench.calibrate`. Local charts and checked-in traces do not require GPU installation to inspect.
 
 With Docker running, verify the actual final modules over loopback HTTP inside network-isolated containers:
 

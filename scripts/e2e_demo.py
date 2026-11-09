@@ -13,6 +13,13 @@ import httpx
 from sandbox_smoke import ROOT, PayPalClient, approve_wallet, check, locked_journal, now, require, settings
 
 SOURCES = ("starlette", "fastapi")
+# Preparation earns real publisher balances with short, read-only framework tasks.
+# The acceptance sessions always use the built-in coding task and its full contract.
+PREPARATION_TASKS = (
+    "Trace dependency resolution in FastAPI and show a minimal request-header dependency.",
+    "Explain how a FastAPI route dispatches into Starlette and show a small ASGI example.",
+    "Trace FastAPI exception handling through Starlette and demonstrate a custom exception handler.",
+)
 SETTLED = {"CLOSED", "VOIDED", "EXPIRED"}
 DEFAULT_STATE = ROOT / "logs" / "demo-workspace.json"
 
@@ -242,9 +249,15 @@ class Demo:
                 check(mandate["status"] == "ACTIVE", "This mandate closed before a run started. Inspect its sandbox authorization.")
                 if purpose == "acceptance":
                     self.call("POST", "/judge/fault", {"ttft_delay_ms":1200, "calls":3})
+                workload = {"task_id": "rate-limit"}
+                if purpose == "preparation":
+                    index = sum(p["purpose"] == "preparation" for p in self.sessions[:self.sessions.index(s)])
+                    workload = {"task_id": "custom", "task_text": PREPARATION_TASKS[index % len(PREPARATION_TASKS)]}
+                s["workload"] = workload
+                self.journal.save()
                 try:
                     run = self.call("POST", "/agent/runs", {"mandate_id":mid, "context_id":self.contexts["fastapi"],
-                                    "task_id":"rate-limit", "cold_fraction":.25, "est_turns":10})
+                                    **workload, "cold_fraction":.25, "est_turns":10})
                 except RateLimit as exc:
                     # Release the unused authorization before waiting beyond the idle timeout.
                     voided = self.call("POST", f"/mandates/{mid}/close")
