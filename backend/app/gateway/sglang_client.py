@@ -29,6 +29,10 @@ class Engine(httpx.Client):
         body = {"prompt": text, "add_special_tokens": False}
         return self.post("/tokenize", json=body).raise_for_status().json()["tokens"]
 
+    def decode(self, ids):
+        body = {"tokens": ids, "skip_special_tokens": False}
+        return self.post("/detokenize", json=body).raise_for_status().json()["text"]
+
     def sample(self, ids, max_new_tokens=8):
         body = {"input_ids": ids, "sampling_params": {"temperature": 0, "max_new_tokens": max_new_tokens}}
         return self.post("/generate", json=body).raise_for_status().json()
