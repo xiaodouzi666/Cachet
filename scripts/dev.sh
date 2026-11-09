@@ -22,7 +22,7 @@ start() {
   local session=$1
   shift
   if tmux has-session -t "=$session" 2>/dev/null; then
-    if [[ $(tmux display-message -p -t "=$session" '#{session_path}') != "$repo" ]]; then
+    if [[ $(tmux display-message -p -t "=$session:" '#{session_path}') != "$repo" ]]; then
       echo "The tmux session $session belongs to another checkout." >&2
       return 1
     fi
