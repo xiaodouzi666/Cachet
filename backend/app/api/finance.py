@@ -360,6 +360,9 @@ def royalties(ws=wsdep):
                     "publisher_id": c.publisher_id,
                     "title": c.title,
                     "scope": "published" if published else "purchased",
+                    "historical_totals_complete": marketplace.complete_history(db, c.id)
+                    if published
+                    else True,
                     "hit_tokens": hits,
                     "linear_micros": linear,
                     "shapley_micros": gross,

@@ -121,6 +121,7 @@ def view(db, c, workspace_id):
         "token_len": c.token_len,
         "last_probe_hit_ratio": c.last_probe_hit_ratio,
         "last_probe_at": c.last_probe_at,
+        "historical_totals_complete": marketplace.complete_history(db, c.id),
         "total_hits": hits,
         "royalty_micros": royalties,
         "price_shared": value("PRICE_SHARED", "0.15"),

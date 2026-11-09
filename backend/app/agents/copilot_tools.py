@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
-from .. import ledger
+from .. import ledger, marketplace
 from ..db import session_scope
 from ..models import (
     AgentRun,
@@ -117,6 +117,12 @@ def earnings(db, ws, days=7):
             lines.append(
                 f"{p.name} received {rate:.6f} microdollars per hit before reversals. "
                 f"A linear split on the same calls gives {usd(s['linear'])}."
+            )
+    for context in db.scalars(select(Context).where(Context.workspace_id == ws)):
+        if not marketplace.complete_history(db, context.id):
+            lines.append(
+                f"Historical layer-level hits and gross royalties for {context.title} are incomplete; "
+                "its publisher's original net ledger entries have been preserved."
             )
     if any(s["gross"] != s["linear"] for s in stats.values()):
         lines.append(

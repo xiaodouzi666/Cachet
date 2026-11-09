@@ -1,9 +1,18 @@
+from datetime import timedelta
+
 from sqlalchemy import select
 from backend.app import ledger
 from backend.app.api.access import owned
 from backend.app.config import value
 from backend.app.db import session_scope
-from backend.app.models import PayoutBatch, PayoutItem, Publisher, Workspace, new_id
+from backend.app.models import (
+    PayoutBatch,
+    PayoutItem,
+    Publisher,
+    Workspace,
+    new_id,
+    utcnow,
+)
 from backend.app.money import usd_to_micros
 from backend.app.paypal.client import PayPalClient, request_id
 from backend.app.settlement.service import cents, lock
@@ -103,15 +112,29 @@ def settle(ws, batch_id=None):
                         )
                     )
                 db.flush()
+            payout_items = list(
+                db.scalars(select(PayoutItem).where(PayoutItem.batch_id == b.id))
+            )
+            if not b.paypal_batch_id:
+                if utcnow() - b.created_at >= timedelta(days=29):
+                    raise ValueError(
+                        "Unconfirmed payout is near the sender-batch deduplication limit; reconcile its PayPal status"
+                    )
+                for item in payout_items:
+                    available = ledger.available_payable(
+                        db, ws, item.publisher_id, excluding_reservation=item.id
+                    )
+                    if item.amount_cents * 10_000 > available:
+                        raise ValueError(
+                            "The prepared payout exceeds funded royalties; reconcile before resubmission"
+                        )
             items = [
                 (
                     i.id,
                     db.get(Publisher, i.publisher_id).paypal_receiver_email,
                     i.amount_cents,
                 )
-                for i in db.scalars(
-                    select(PayoutItem).where(PayoutItem.batch_id == b.id)
-                )
+                for i in payout_items
             ]
         with PayPalClient.from_env() as pp:
             if not b.paypal_batch_id:

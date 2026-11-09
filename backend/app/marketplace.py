@@ -3,6 +3,7 @@
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 
+from .operations import Control
 from .models import Call, Context, MarketListing, RoyaltyUsage, Workspace
 
 
@@ -46,6 +47,10 @@ def publish(db, ctx, parent):
         return
     db.add(MarketListing(context_id=ctx.id, parent_id=parent_identifier))
     db.flush()
+
+
+def complete_history(db, context_id):
+    return db.get(Control, f"partial-layer-history:{context_id}") is None
 
 
 def totals(db, context_id, *, buyer=None):

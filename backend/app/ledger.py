@@ -517,21 +517,80 @@ def record_refund(session, refund):
     session.get(Mandate, capture.mandate_id).refunded_micros += cash
 
 
-def available_payable(session, workspace_id, publisher_id):
-    reserved = session.scalar(
-        select(func.coalesce(func.sum(PayoutItem.amount_cents), 0)).where(
-            PayoutItem.workspace_id == workspace_id,
-            PayoutItem.publisher_id == publisher_id,
-            PayoutItem.status.not_in(
-                (*PAID, "FAILED", "DENIED", "CANCELED", "RETURNED")
-            ),
+def _funded_royalties(session, publisher_id):
+    """Release captured portions and the platform's explicitly posted final rounding subsidy."""
+
+    def micros(column):
+        return func.coalesce(column[publisher_id].as_integer(), 0)
+
+    alloc = CaptureAllocation
+    settled = (
+        select(
+            func.coalesce(
+                func.sum(
+                    micros(alloc.royalty_json) - micros(alloc.refunded_royalty_json)
+                ),
+                0,
+            )
+        )
+        .join(Capture, Capture.id == alloc.capture_id)
+        .join(
+            LedgerTxn,
+            (LedgerTxn.ref_type == "capture") & (LedgerTxn.ref_id == Capture.id),
+        )
+        .where(Capture.status.in_(CAPTURED), Capture.paypal_capture_id.is_not(None))
+    )
+
+    # If a final balance was below half a cent, close_dust explicitly expenses the unpaid
+    # principal to the platform. Only the still-unallocated share of those calls qualifies.
+    dust_calls = (
+        select(Call.id)
+        .join(AgentRun, AgentRun.id == Call.run_id)
+        .join(
+            LedgerTxn,
+            (LedgerTxn.ref_type == "close_dust")
+            & (LedgerTxn.ref_id == AgentRun.mandate_id),
         )
     )
-    return max(
-        0,
-        -balance(session, workspace_id, payable(publisher_id))
-        - reserved * MICROS_PER_CENT,
+    dust_earned = session.scalar(
+        select(
+            func.coalesce(
+                func.sum(
+                    micros(Call.royalty_json) - micros(Call.reversed_royalty_json)
+                ),
+                0,
+            )
+        ).where(Call.id.in_(dust_calls))
     )
+    allocated = session.scalar(
+        select(func.coalesce(func.sum(micros(alloc.royalty_json)), 0)).where(
+            alloc.call_id.in_(dust_calls)
+        )
+    )
+    return session.scalar(settled) + dust_earned - allocated
+
+
+def available_payable(
+    session, workspace_id, publisher_id, *, excluding_reservation=None
+):
+    """Cap spendable royalties at settled principal and reserve each in-flight payout once."""
+    account = -balance(session, workspace_id, payable(publisher_id))
+    if account <= 0:
+        return 0
+    query = select(PayoutItem.status, func.sum(PayoutItem.amount_cents)).where(
+        PayoutItem.workspace_id == workspace_id, PayoutItem.publisher_id == publisher_id
+    )
+    if excluding_reservation is not None:
+        query = query.where(PayoutItem.id != excluding_reservation)
+    rows = session.execute(query.group_by(PayoutItem.status))
+    paid = reserved = 0
+    for status, cents in rows:
+        if status in PAID:
+            paid += cents * MICROS_PER_CENT
+        elif status not in {"FAILED", "DENIED", "CANCELED", "RETURNED"}:
+            reserved += cents * MICROS_PER_CENT
+    funded = _funded_royalties(session, publisher_id) - paid
+    return max(0, min(account, funded) - reserved)
 
 
 def record_payout(session, item, *, fee_cents=None):
