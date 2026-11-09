@@ -1,0 +1,215 @@
+{
+  "tokenizer": {
+    "model_id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+    "revision": "b25037543e9394b818fdfca67ab2a00ecc7dd641",
+    "vocabulary_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+    "config_json_sha256": "ec0c1f5f875ad8bc1f78c5140c22dbdde1b55478442ad358e7a4d9ecf947a327",
+    "add_special_tokens": false,
+    "ids_sha256_encoding": "SHA-256 of unsigned 32-bit little-endian token IDs"
+  },
+  "context_window": 32768,
+  "reserved_tokens": 4096,
+  "projects": {
+    "starlette": {
+      "version": "1.10.0",
+      "source_url": "https://github.com/Kludex/starlette",
+      "revision": "8aa828ceaff764a2e57932fb42fdf105a47c4c83",
+      "license": "BSD-3-Clause",
+      "license_path": "contexts/sources/starlette/LICENSE.md",
+      "license_sha256": "dcb95677a02240243187e964f941847d19b17821cf99e5afae684fab328c19bf"
+    },
+    "fastapi": {
+      "version": "0.162.2",
+      "source_url": "https://github.com/fastapi/fastapi",
+      "revision": "3adc94ef0fb4ffd77bace5467baeb758b43e3da5",
+      "license": "MIT",
+      "license_path": "contexts/sources/fastapi/LICENSE",
+      "license_sha256": "4ec89ffc81485b97fec584b2d4a961032eeffe834453894fd9c1274906cc744e"
+    },
+    "httpx": {
+      "version": "0.28.1",
+      "source_url": "https://github.com/encode/httpx",
+      "revision": "26d48e0634e6ee9cdc0533996db289ce4b430177",
+      "license": "BSD-3-Clause",
+      "license_path": "contexts/sources/httpx/LICENSE.md",
+      "license_sha256": "4ec59d544f12b5f539a3a716fd321ac58ccd8030b465221f2c880200cdf28d8d"
+    },
+    "qwen": {
+      "version": "Qwen2.5-7B-Instruct-AWQ",
+      "source_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ",
+      "revision": "b25037543e9394b818fdfca67ab2a00ecc7dd641",
+      "license": "Apache-2.0",
+      "license_path": "contexts/sources/qwen/LICENSE",
+      "license_sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e"
+    }
+  },
+  "contexts": [
+    {
+      "slug": "starlette",
+      "parent": null,
+      "text_path": "contexts/sources/starlette/context.txt",
+      "text_sha256": "c9a09a61860f1c0df0fdba83d44a159aba64293552c109239249dbbbff5863c2",
+      "token_len": 11992,
+      "ids_sha256": "3e5222133b0761b2d701c0add84db63f12111a75983bc55d25b328a4b477b8b1",
+      "files": [
+        {
+          "path": "starlette/types.py",
+          "start_line": 1,
+          "end_line": 26,
+          "source_sha256": "f3bc13bb0175d37e90c51b1ede62f9a8eb92f62e1af7168864ca938d8fa5befa",
+          "excerpt_sha256": "f3bc13bb0175d37e90c51b1ede62f9a8eb92f62e1af7168864ca938d8fa5befa"
+        },
+        {
+          "path": "starlette/applications.py",
+          "start_line": 1,
+          "end_line": 124,
+          "source_sha256": "81887e0baf7dda5811ba4b7a67e49cbbab7ae97b321ba72e475c797f989690e9",
+          "excerpt_sha256": "81887e0baf7dda5811ba4b7a67e49cbbab7ae97b321ba72e475c797f989690e9"
+        },
+        {
+          "path": "starlette/routing.py",
+          "start_line": 1,
+          "end_line": 772,
+          "source_sha256": "d188bff888d4e96c9197b00daba35d50c9b0422d06a734fff436a5ae91d69753",
+          "excerpt_sha256": "d188bff888d4e96c9197b00daba35d50c9b0422d06a734fff436a5ae91d69753"
+        },
+        {
+          "path": "starlette/middleware/__init__.py",
+          "start_line": 1,
+          "end_line": 37,
+          "source_sha256": "04e4673a3d27d262f5396514b353cb4eed520129af4fc90410303a71bba1b8fa",
+          "excerpt_sha256": "04e4673a3d27d262f5396514b353cb4eed520129af4fc90410303a71bba1b8fa"
+        },
+        {
+          "path": "starlette/middleware/base.py",
+          "start_line": 1,
+          "end_line": 254,
+          "source_sha256": "d054b70ac0cff44bb83b08a39c48542f25be8305c2e547a91635498c4ffc44d0",
+          "excerpt_sha256": "d054b70ac0cff44bb83b08a39c48542f25be8305c2e547a91635498c4ffc44d0"
+        },
+        {
+          "path": "starlette/middleware/body_limit.py",
+          "start_line": 1,
+          "end_line": 132,
+          "source_sha256": "2f5d84bc50bef6bc8efc0ff69e0743a6de96695930840b6a8ae24f87286ac80f",
+          "excerpt_sha256": "2f5d84bc50bef6bc8efc0ff69e0743a6de96695930840b6a8ae24f87286ac80f"
+        },
+        {
+          "path": "tests/test_routing.py",
+          "start_line": 315,
+          "end_line": 318,
+          "source_sha256": "c992e7fab2897e02fec576c88c7298cd8a4196f70b6423a00cdc4b61c01ade56",
+          "excerpt_sha256": "bae2d45530d94514ae6185c897dd0d9e0c8618dd6313575fede89f866fbca52c"
+        },
+        {
+          "path": "tests/test_routing.py",
+          "start_line": 348,
+          "end_line": 365,
+          "source_sha256": "c992e7fab2897e02fec576c88c7298cd8a4196f70b6423a00cdc4b61c01ade56",
+          "excerpt_sha256": "29a32ebd53ae8e7267028ba4a7f08d68dc2c914e3f05999c080a62c555e45b45"
+        }
+      ]
+    },
+    {
+      "slug": "fastapi",
+      "parent": "starlette",
+      "text_path": "contexts/sources/fastapi/context.txt",
+      "text_sha256": "e7eaa42dd044398c59e2da49ad828d556a5334247bbfabe1b5ac1b2878c3fb63",
+      "token_len": 13908,
+      "ids_sha256": "9c878aa545d445dece4257f6eb806a9f662c25a9e9092ee9b52a66ba50fd6865",
+      "files": [
+        {
+          "path": "fastapi/routing.py",
+          "start_line": 1,
+          "end_line": 168,
+          "source_sha256": "ca8791eabd4420688941a1d7e5bbb65a51454409f34ffd0313a27dac6beaf4b8",
+          "excerpt_sha256": "87556b2b69dd57fe246eb3789cd8b1c4e931d88aa737739306b1d9939e2af46a"
+        },
+        {
+          "path": "fastapi/routing.py",
+          "start_line": 286,
+          "end_line": 804,
+          "source_sha256": "ca8791eabd4420688941a1d7e5bbb65a51454409f34ffd0313a27dac6beaf4b8",
+          "excerpt_sha256": "2ed97927eff9e0a7d92d75a6f1180ca8cfdd1ff59f2d2be0cd7d9cbe1c511a25"
+        },
+        {
+          "path": "fastapi/routing.py",
+          "start_line": 904,
+          "end_line": 1330,
+          "source_sha256": "ca8791eabd4420688941a1d7e5bbb65a51454409f34ffd0313a27dac6beaf4b8",
+          "excerpt_sha256": "0448f8263bbaaf68771e7d045b46ea0841866d7a00d34aeedc751e4603a5efb7"
+        },
+        {
+          "path": "fastapi/routing.py",
+          "start_line": 2791,
+          "end_line": 2906,
+          "source_sha256": "ca8791eabd4420688941a1d7e5bbb65a51454409f34ffd0313a27dac6beaf4b8",
+          "excerpt_sha256": "63a616e637d907d12a50e62040ed52f7e848fc00ef4a372d44483e126e41a768"
+        },
+        {
+          "path": "fastapi/routing.py",
+          "start_line": 2994,
+          "end_line": 3138,
+          "source_sha256": "ca8791eabd4420688941a1d7e5bbb65a51454409f34ffd0313a27dac6beaf4b8",
+          "excerpt_sha256": "83064f3f403fc7917ea5faf24e3dcfdbfc129d6c4121837fce9ea08fbb294b6f"
+        },
+        {
+          "path": "fastapi/applications.py",
+          "start_line": 1032,
+          "end_line": 1083,
+          "source_sha256": "a87379cc9eee7164b450471278060a9a9745ac52d08e54844069afe7f94d0cca",
+          "excerpt_sha256": "11dddac6c1b6249842262da8b313415b0b7310fea83940f2052e81fab1b2daaa"
+        },
+        {
+          "path": "fastapi/applications.py",
+          "start_line": 1175,
+          "end_line": 1262,
+          "source_sha256": "a87379cc9eee7164b450471278060a9a9745ac52d08e54844069afe7f94d0cca",
+          "excerpt_sha256": "b19c9f24522170edbcd4db203884f61f9005440f72f436f97bba65081d3f0651"
+        },
+        {
+          "path": "fastapi/applications.py",
+          "start_line": 4725,
+          "end_line": 4769,
+          "source_sha256": "a87379cc9eee7164b450471278060a9a9745ac52d08e54844069afe7f94d0cca",
+          "excerpt_sha256": "ae9483b6de3a87bf9834ff03ab1ea7fe69304c4f2c74a892d2b284d10764a5c3"
+        },
+        {
+          "path": "fastapi/middleware/asyncexitstack.py",
+          "start_line": 1,
+          "end_line": 18,
+          "source_sha256": "44a1a54291b383718ba2ca9586bc41cbf34267da894bbcd078d1ede58df1fb4d",
+          "excerpt_sha256": "44a1a54291b383718ba2ca9586bc41cbf34267da894bbcd078d1ede58df1fb4d"
+        },
+        {
+          "path": "docs_src/middleware/tutorial001_py310.py",
+          "start_line": 1,
+          "end_line": 14,
+          "source_sha256": "bf7786e78360628c04482e348ae8b749e54dff17b8448f6ec8971470d38e3800",
+          "excerpt_sha256": "bf7786e78360628c04482e348ae8b749e54dff17b8448f6ec8971470d38e3800"
+        },
+        {
+          "path": "docs_src/custom_request_and_route/tutorial003_py310.py",
+          "start_line": 1,
+          "end_line": 39,
+          "source_sha256": "2fc74e148cce29cbe9dffdea75faf5d6a293c5086746d461e14d8f987639766a",
+          "excerpt_sha256": "2fc74e148cce29cbe9dffdea75faf5d6a293c5086746d461e14d8f987639766a"
+        },
+        {
+          "path": "tests/test_custom_middleware_exception.py",
+          "start_line": 1,
+          "end_line": 96,
+          "source_sha256": "dc122f1b9639c019f124ee4f75b6cffb639adeeca9ca4bdb80094942878e0b2d",
+          "excerpt_sha256": "dc122f1b9639c019f124ee4f75b6cffb639adeeca9ca4bdb80094942878e0b2d"
+        },
+        {
+          "path": "tests/test_tutorial/test_custom_request_and_route/test_tutorial003.py",
+          "start_line": 1,
+          "end_line": 32,
+          "source_sha256": "52ca76aa8c3d8e88de90d453021aaf363a4b2c7c2daf0f0727b7eaa921e962fe",
+          "excerpt_sha256": "52ca76aa8c3d8e88de90d453021aaf363a4b2c7c2daf0f0727b7eaa921e962fe"
+        }
+      ]
+    }
+  ]
+}

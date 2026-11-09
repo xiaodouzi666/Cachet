@@ -1,0 +1,1784 @@
+# Source: fastapi/routing.py (lines 1-168)
+import contextlib
+import copy
+import email.message
+import errno
+import functools
+import inspect
+import json
+import math
+import os
+import stat
+import threading
+import types
+import warnings
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Generator,
+    Iterator,
+    Mapping,
+    Sequence,
+)
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+)
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from enum import Enum, IntEnum
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    Protocol,
+    TypeVar,
+    cast,
+)
+
+import anyio
+from annotated_doc import Doc
+from anyio.abc import ObjectReceiveStream
+from fastapi import params
+from fastapi._compat import (
+    ModelField,
+    Undefined,
+    lenient_issubclass,
+)
+from fastapi.datastructures import Default, DefaultPlaceholder
+from fastapi.dependencies.models import (
+    Dependant,
+    _is_async_gen_callable,
+    _is_coroutine_callable,
+    _is_gen_callable,
+)
+from fastapi.dependencies.utils import (
+    SolvedDependency,
+    _get_body_field,
+    _get_flat_body_params,
+    _should_embed_body_fields,
+    get_dependant,
+    get_parameterless_sub_dependant,
+    get_stream_item_type,
+    get_typed_return_annotation,
+    solve_dependencies,
+)
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import (
+    EndpointContext,
+    FastAPIError,
+    RequestValidationError,
+    ResponseValidationError,
+    WebSocketRequestValidationError,
+)
+from fastapi.sse import (
+    _PING_INTERVAL,
+    KEEPALIVE_COMMENT,
+    EventSourceResponse,
+    ServerSentEvent,
+    format_sse_event,
+)
+from fastapi.telemetry._api import (
+    _operation,
+    _route_selected,
+    _run_sync_endpoint,
+    _validation_failed,
+    get_telemetry_data,
+)
+from fastapi.types import DecoratedCallable, IncEx
+from fastapi.utils import (
+    create_model_field,
+    generate_unique_id,
+    get_value_or_default,
+    is_body_allowed_for_status_code,
+)
+from starlette import routing
+from starlette._exception_handler import wrap_app_handling_exceptions
+from starlette._utils import get_route_path, is_async_callable
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
+from starlette.datastructures import URL, URLPath
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import (
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
+from starlette.routing import (
+    BaseRoute,
+    Match,
+    NoMatchFound,
+    compile_path,
+    get_name,
+)
+from starlette.routing import Mount as Mount  # noqa
+from starlette.staticfiles import StaticFiles
+from starlette.types import AppType, ASGIApp, Lifespan, Receive, Scope, Send
+from starlette.websockets import WebSocket
+from typing_extensions import deprecated
+
+
+# Copy of starlette.routing.request_response modified to include the
+# dependencies' AsyncExitStack
+def request_response(
+    func: Callable[[Request], Awaitable[Response] | Response],
+) -> ASGIApp:
+    """
+    Takes a function or coroutine `func(request) -> response`,
+    and returns an ASGI application.
+    """
+    f: Callable[[Request], Awaitable[Response]] = (
+        func  # type: ignore[assignment]
+        if is_async_callable(func)
+        else functools.partial(run_in_threadpool, func)  # type: ignore[call-arg]
+    )  # ty: ignore[invalid-assignment]
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        request = Request(scope, receive, send)
+
+        async def app(scope: Scope, receive: Receive, send: Send) -> None:
+            # Starts customization
+            response_awaited = False
+            async with AsyncExitStack() as request_stack:
+                scope["fastapi_inner_astack"] = request_stack
+                async with AsyncExitStack() as function_stack:
+                    scope["fastapi_function_astack"] = function_stack
+                    response = await f(request)
+                await response(scope, receive, send)
+                # Continues customization
+                response_awaited = True
+            if not response_awaited:
+                raise FastAPIError(
+                    "Response not awaited. There's a high chance that the "
+                    "application code is raising an exception and a dependency with yield "
+                    "has a block with a bare except, or a block with except Exception, "
+                    "and is not raising the exception again. Read more about it in the "
+                    "docs: https://fastapi.tiangolo.com/tutorial/dependencies/dependencies-with-yield/#dependencies-with-yield-and-except"
+                )
+
+        # Same as in Starlette
+        await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+
+    return app
+
+# Source: fastapi/routing.py (lines 286-804)
+def _extract_endpoint_context(func: Any) -> EndpointContext:
+    """Extract endpoint context with caching to avoid repeated file I/O."""
+    func_id = id(func)
+
+    if func_id in _endpoint_context_cache:
+        return _endpoint_context_cache[func_id]
+
+    try:
+        ctx: EndpointContext = {}
+
+        if (source_file := inspect.getsourcefile(func)) is not None:
+            ctx["file"] = source_file
+        if (line_number := inspect.getsourcelines(func)[1]) is not None:
+            ctx["line"] = line_number
+        if (func_name := getattr(func, "__name__", None)) is not None:
+            ctx["function"] = func_name
+    except Exception:
+        ctx = EndpointContext()
+
+    _endpoint_context_cache[func_id] = ctx
+    return ctx
+
+
+def _normalize_non_finite_floats(data: Any) -> Any:
+    """Replace non-finite values in JSON-compatible data, preserving dict keys."""
+    if isinstance(data, float):
+        return data if math.isfinite(data) else None
+    if isinstance(data, dict):
+        return {key: _normalize_non_finite_floats(value) for key, value in data.items()}
+    if isinstance(data, list):
+        return [_normalize_non_finite_floats(value) for value in data]
+    return data
+
+
+async def serialize_response(
+    *,
+    field: ModelField | None = None,
+    response_content: Any,
+    include: IncEx | None = None,
+    exclude: IncEx | None = None,
+    by_alias: bool = True,
+    exclude_unset: bool = False,
+    exclude_defaults: bool = False,
+    exclude_none: bool = False,
+    is_coroutine: bool = True,
+    endpoint_ctx: EndpointContext | None = None,
+    dump_json: bool = False,
+) -> Any:
+    if field:
+        if is_coroutine:
+            value, errors = field.validate(response_content, {}, loc=("response",))
+        else:
+            value, errors = await run_in_threadpool(
+                field.validate, response_content, {}, loc=("response",)
+            )
+        if errors:
+            ctx = endpoint_ctx or EndpointContext()
+            raise ResponseValidationError(
+                errors=errors,
+                body=response_content,
+                endpoint_ctx=ctx,
+            )
+        serializer = field.serialize_json if dump_json else field.serialize
+        return serializer(
+            value,
+            include=include,
+            exclude=exclude,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+        )
+
+    else:
+        return jsonable_encoder(response_content)
+
+
+async def run_endpoint_function(
+    *, dependant: Dependant, values: dict[str, Any], is_coroutine: bool
+) -> Any:
+    # Only called by get_request_handler. Has been split into its own function to
+    # facilitate profiling endpoints, since inner functions are harder to profile.
+    assert dependant.call is not None, "dependant.call must be a function"
+
+    if is_coroutine:
+        with _operation(name="endpoint", function=dependant.call):
+            return await dependant.call(**values)
+    else:
+        return await run_in_threadpool(
+            _run_sync_endpoint, function=dependant.call, arguments=values
+        )
+
+
+def _build_response_args(
+    *, status_code: int | None, solved_result: Any
+) -> dict[str, Any]:
+    response_args: dict[str, Any] = {
+        "background": solved_result.background_tasks,
+    }
+    # If status_code was set, use it, otherwise use the default from the
+    # response class, in the case of redirect it's 307
+    current_status_code = (
+        status_code if status_code else solved_result.response.status_code
+    )
+    if current_status_code is not None:
+        response_args["status_code"] = current_status_code
+    if solved_result.response.status_code:
+        response_args["status_code"] = solved_result.response.status_code
+    return response_args
+
+
+def get_request_handler(
+    dependant: Dependant,
+    body_field: ModelField | None = None,
+    status_code: int | None = None,
+    response_class: type[Response] | DefaultPlaceholder = Default(JSONResponse),
+    response_field: ModelField | None = None,
+    response_model_include: IncEx | None = None,
+    response_model_exclude: IncEx | None = None,
+    response_model_by_alias: bool = True,
+    response_model_exclude_unset: bool = False,
+    response_model_exclude_defaults: bool = False,
+    response_model_exclude_none: bool = False,
+    dependency_overrides_provider: Any | None = None,
+    embed_body_fields: bool = False,
+    strict_content_type: bool | DefaultPlaceholder = Default(True),
+    stream_item_field: ModelField | None = None,
+    is_json_stream: bool = False,
+) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+    assert dependant.call is not None, "dependant.call must be a function"
+    is_coroutine = _is_coroutine_callable(dependant.call)
+    is_body_form = body_field and isinstance(body_field.field_info, params.Form)
+    if isinstance(response_class, DefaultPlaceholder):
+        actual_response_class: type[Response] = response_class.value
+    else:
+        actual_response_class = response_class
+    is_sse_stream = lenient_issubclass(actual_response_class, EventSourceResponse)
+    if isinstance(strict_content_type, DefaultPlaceholder):
+        actual_strict_content_type: bool = strict_content_type.value
+    else:
+        actual_strict_content_type = strict_content_type
+
+    async def app(request: Request) -> Response:
+        telemetry_data = get_telemetry_data()
+        if telemetry_data is not None:
+            telemetry_data.request = request
+        response: Response | None = None
+        file_stack = request.scope.get("fastapi_middleware_astack")
+        assert isinstance(file_stack, AsyncExitStack), (
+            "fastapi_middleware_astack not found in request scope"
+        )
+
+        # Extract endpoint context for error messages
+        endpoint_ctx = (
+            _extract_endpoint_context(dependant.call)
+            if dependant.call
+            else EndpointContext()
+        )
+
+        if dependant.path:
+            # For mounted sub-apps, include the mount path prefix
+            mount_path = request.scope.get("root_path", "").rstrip("/")
+            endpoint_ctx["path"] = f"{request.method} {mount_path}{dependant.path}"
+
+        # Read body and auto-close files
+        try:
+            body: Any = Undefined
+            if body_field:
+                if is_body_form:
+                    body = await request.form()
+                    file_stack.push_async_callback(body.close)
+                else:
+                    body_bytes = await request.body()
+                    if body_bytes:
+                        json_body: Any = Undefined
+                        content_type_value = request.headers.get("content-type")
+                        if not content_type_value:
+                            if not actual_strict_content_type:
+                                json_body = await request.json()
+                        else:
+                            message = email.message.Message()
+                            message["content-type"] = content_type_value
+                            if message.get_content_maintype() == "application":
+                                subtype = message.get_content_subtype()
+                                if subtype == "json" or subtype.endswith("+json"):
+                                    json_body = await request.json()
+                        if json_body is not Undefined:
+                            body = json_body
+                        else:
+                            body = body_bytes
+        except json.JSONDecodeError as e:
+            validation_error = RequestValidationError(
+                [
+                    {
+                        "type": "json_invalid",
+                        "loc": ("body", e.pos),
+                        "msg": "JSON decode error",
+                        "input": {},
+                        "ctx": {"error": e.msg},
+                    }
+                ],
+                body=e.doc,
+                endpoint_ctx=endpoint_ctx,
+            )
+            _validation_failed(validation_error)
+            raise validation_error from e
+        except HTTPException:
+            # If a middleware raises an HTTPException, it should be raised again
+            raise
+        except Exception as e:
+            http_error = HTTPException(
+                status_code=400, detail="There was an error parsing the body"
+            )
+            raise http_error from e
+
+        if telemetry_data is not None:
+            telemetry_data.body = None if body is Undefined else body
+
+        # Solve dependencies and run path operation function, auto-closing dependencies
+        errors: list[Any] = []
+        async_exit_stack = request.scope.get("fastapi_inner_astack")
+        assert isinstance(async_exit_stack, AsyncExitStack), (
+            "fastapi_inner_astack not found in request scope"
+        )
+        with _operation(name="dependencies", function=dependant.call):
+            solved_result = await solve_dependencies(
+                request=request,
+                dependant=dependant,
+                body=body,
+                dependency_overrides_provider=dependency_overrides_provider,
+                async_exit_stack=async_exit_stack,
+                embed_body_fields=embed_body_fields,
+            )
+            if telemetry_data is not None:
+                telemetry_data.values = solved_result.values
+                telemetry_data.errors = solved_result.errors
+        errors = solved_result.errors
+        assert dependant.call  # For types
+        if not errors:
+            # Shared serializer for stream items (JSONL and SSE).
+            # Validates against stream_item_field when set, then
+            # serializes to JSON bytes.
+            def _serialize_data(data: Any) -> bytes:
+                if stream_item_field:
+                    value, errors_ = stream_item_field.validate(
+                        data, {}, loc=("response",)
+                    )
+                    if errors_:
+                        ctx = endpoint_ctx or EndpointContext()
+                        raise ResponseValidationError(
+                            errors=errors_,
+                            body=data,
+                            endpoint_ctx=ctx,
+                        )
+                    return stream_item_field.serialize_json(
+                        value,
+                        include=response_model_include,
+                        exclude=response_model_exclude,
+                        by_alias=response_model_by_alias,
+                        exclude_unset=response_model_exclude_unset,
+                        exclude_defaults=response_model_exclude_defaults,
+                        exclude_none=response_model_exclude_none,
+                    )
+                else:
+                    data = jsonable_encoder(data)
+                    return json.dumps(_normalize_non_finite_floats(data)).encode(
+                        "utf-8"
+                    )
+
+            if is_sse_stream:
+                # Generator endpoint: stream as Server-Sent Events
+                gen = dependant.call(**solved_result.values)
+
+                def _serialize_sse_item(item: Any) -> bytes:
+                    if isinstance(item, ServerSentEvent):
+                        # User controls the event structure.
+                        # Serialize the data payload if present.
+                        # For ServerSentEvent items we skip stream_item_field
+                        # validation (the user may mix types intentionally).
+                        if item.raw_data is not None:
+                            data_str: str | None = item.raw_data
+                        elif item.data is not None:
+                            if hasattr(item.data, "model_dump_json"):
+                                data_str = item.data.model_dump_json()
+                            else:
+                                data_str = json.dumps(
+                                    _normalize_non_finite_floats(
+                                        jsonable_encoder(item.data)
+                                    )
+                                )
+                        else:
+                            data_str = None
+                        return format_sse_event(
+                            data_str=data_str,
+                            event=item.event,
+                            id=item.id,
+                            retry=item.retry,
+                            comment=item.comment,
+                        )
+                    else:
+                        # Plain object: validate + serialize via
+                        # stream_item_field (if set) and wrap in data field
+                        return format_sse_event(
+                            data_str=_serialize_data(item).decode("utf-8")
+                        )
+
+                if _is_async_gen_callable(dependant.call):
+                    sse_aiter: AsyncIterator[Any] = gen.__aiter__()
+                else:
+                    sse_aiter = iterate_in_threadpool(gen)
+
+                @asynccontextmanager
+                async def _sse_producer_cm() -> AsyncIterator[
+                    ObjectReceiveStream[bytes]
+                ]:
+                    # Use a memory stream to decouple generator iteration
+                    # from the keepalive timer. A producer task pulls items
+                    # from the generator independently, so
+                    # `anyio.fail_after` never wraps the generator's
+                    # `__anext__` directly - avoiding CancelledError that
+                    # would finalize the generator and also working for sync
+                    # generators running in a thread pool.
+                    #
+                    # This context manager is entered on the request-scoped
+                    # AsyncExitStack so its __aexit__ (which cancels the
+                    # task group) is called by the exit stack after the
+                    # streaming response completes — not by async generator
+                    # finalization via GeneratorExit.
+                    # Ref: https://peps.python.org/pep-0789/
+                    send_stream, receive_stream = anyio.create_memory_object_stream[
+                        bytes
+                    ](max_buffer_size=1)
+
+                    async def _producer() -> None:
+                        async with send_stream:
+                            async for raw_item in sse_aiter:
+                                await send_stream.send(_serialize_sse_item(raw_item))
+
+                    send_keepalive, receive_keepalive = (
+                        anyio.create_memory_object_stream[bytes](max_buffer_size=1)
+                    )
+
+                    async def _keepalive_inserter() -> None:
+                        """Read from the producer and forward to the output,
+                        inserting keepalive comments on timeout."""
+                        async with send_keepalive, receive_stream:
+                            try:
+                                while True:
+                                    try:
+                                        with anyio.fail_after(_PING_INTERVAL):
+                                            data = await receive_stream.receive()
+                                        await send_keepalive.send(data)
+                                    except TimeoutError:
+                                        await send_keepalive.send(KEEPALIVE_COMMENT)
+                            except anyio.EndOfStream:
+                                pass
+
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(_producer)
+                        tg.start_soon(_keepalive_inserter)
+                        yield receive_keepalive
+                        tg.cancel_scope.cancel()
+
+                # Enter the SSE context manager on the request-scoped
+                # exit stack. The stack outlives the streaming response,
+                # so __aexit__ runs via proper structured teardown, not
+                # via GeneratorExit thrown into an async generator.
+                sse_receive_stream = await async_exit_stack.enter_async_context(
+                    _sse_producer_cm()
+                )
+                # Ensure the receive stream is closed when the exit stack
+                # unwinds, preventing ResourceWarning from __del__.
+                async_exit_stack.push_async_callback(sse_receive_stream.aclose)
+
+                async def _sse_with_checkpoints(
+                    stream: ObjectReceiveStream[bytes],
+                ) -> AsyncIterator[bytes]:
+                    async for data in stream:
+                        yield data
+                        # Guarantee a checkpoint so cancellation can be
+                        # delivered even when the producer is faster than
+                        # the consumer and receive() never suspends.
+                        await anyio.sleep(0)
+
+                sse_stream_content: AsyncIterator[bytes] | Iterator[bytes] = (
+                    _sse_with_checkpoints(sse_receive_stream)
+                )
+
+                response_args = _build_response_args(
+                    status_code=status_code, solved_result=solved_result
+                )
+                response = StreamingResponse(
+                    sse_stream_content,
+                    media_type="text/event-stream",
+                    **response_args,
+                )
+                response.headers["Cache-Control"] = "no-cache"
+                # For Nginx proxies to not buffer server sent events
+                response.headers["X-Accel-Buffering"] = "no"
+                response.headers.raw.extend(solved_result.response.headers.raw)
+            elif is_json_stream:
+                # Generator endpoint: stream as JSONL
+                gen = dependant.call(**solved_result.values)
+
+                def _serialize_item(item: Any) -> bytes:
+                    return _serialize_data(item) + b"\n"
+
+                if _is_async_gen_callable(dependant.call):
+
+                    async def _async_stream_jsonl() -> AsyncIterator[bytes]:
+                        async for item in gen:
+                            yield _serialize_item(item)
+                            # To allow for cancellation to trigger
+                            # Ref: https://github.com/fastapi/fastapi/issues/14680
+                            await anyio.sleep(0)
+
+                    jsonl_stream_content: AsyncIterator[bytes] | Iterator[bytes] = (
+                        _async_stream_jsonl()
+                    )
+                else:
+
+                    def _sync_stream_jsonl() -> Iterator[bytes]:
+                        for item in gen:  # ty: ignore[not-iterable]
+                            yield _serialize_item(item)
+
+                    jsonl_stream_content = _sync_stream_jsonl()
+
+                response_args = _build_response_args(
+                    status_code=status_code, solved_result=solved_result
+                )
+                response = StreamingResponse(
+                    jsonl_stream_content,
+                    media_type="application/jsonl",
+                    **response_args,
+                )
+                response.headers.raw.extend(solved_result.response.headers.raw)
+            elif _is_async_gen_callable(dependant.call) or _is_gen_callable(
+                dependant.call
+            ):
+                # Raw streaming with explicit response_class (e.g. StreamingResponse)
+                gen = dependant.call(**solved_result.values)
+                if _is_async_gen_callable(dependant.call):
+
+                    async def _async_stream_raw(
+                        async_gen: AsyncIterator[Any],
+                    ) -> AsyncIterator[Any]:
+                        async for chunk in async_gen:
+                            yield chunk
+                            # To allow for cancellation to trigger
+                            # Ref: https://github.com/fastapi/fastapi/issues/14680
+                            await anyio.sleep(0)
+
+                    gen = _async_stream_raw(gen)
+                response_args = _build_response_args(
+                    status_code=status_code, solved_result=solved_result
+                )
+                response = actual_response_class(content=gen, **response_args)
+                response.headers.raw.extend(solved_result.response.headers.raw)
+            else:
+                raw_response = await run_endpoint_function(
+                    dependant=dependant,
+                    values=solved_result.values,
+                    is_coroutine=is_coroutine,
+                )
+                if isinstance(raw_response, Response):
+                    if raw_response.background is None:
+                        raw_response.background = solved_result.background_tasks
+                    response = raw_response
+                else:
+                    response_args = _build_response_args(
+                        status_code=status_code, solved_result=solved_result
+                    )
+                    # Use the fast path (dump_json) when no custom response
+                    # class was set and a response field with a TypeAdapter
+                    # exists. Serializes directly to JSON bytes via Pydantic's
+                    # Rust core, skipping the intermediate Python dict +
+                    # json.dumps() step.
+                    use_dump_json = response_field is not None and isinstance(
+                        response_class, DefaultPlaceholder
+                    )
+                    with _operation(name="serialization", function=dependant.call):
+                        content = await serialize_response(
+                            field=response_field,
+                            response_content=raw_response,
+                            include=response_model_include,
+                            exclude=response_model_exclude,
+                            by_alias=response_model_by_alias,
+                            exclude_unset=response_model_exclude_unset,
+                            exclude_defaults=response_model_exclude_defaults,
+                            exclude_none=response_model_exclude_none,
+                            is_coroutine=is_coroutine,
+                            endpoint_ctx=endpoint_ctx,
+                            dump_json=use_dump_json,
+                        )
+                    if use_dump_json:
+                        response = Response(
+                            content=content,
+                            media_type="application/json",
+                            **response_args,
+                        )
+                    else:
+                        response = actual_response_class(content, **response_args)
+                    if not is_body_allowed_for_status_code(response.status_code):
+                        response.body = b""
+                    response.headers.raw.extend(solved_result.response.headers.raw)
+        if errors:
+            validation_error = RequestValidationError(
+                errors,
+                body=None if body is Undefined else body,
+                endpoint_ctx=endpoint_ctx,
+            )
+            _validation_failed(validation_error)
+            raise validation_error
+
+        # Return response
+        assert response
+        return response
+
+    return app
+
+# Source: fastapi/routing.py (lines 904-1330)
+def _frontend_dependency_endpoint() -> None:
+    pass  # pragma: no cover
+
+
+def _build_dependant_with_parameterless_dependencies(
+    *,
+    path: str,
+    call: Callable[..., Any],
+    dependencies: Sequence[params.Depends],
+) -> tuple[Dependant, list[ModelField], bool]:
+    dependant = get_dependant(path=path, call=call, scope="function")
+    for depends in dependencies[::-1]:
+        dependant.dependencies.insert(
+            0,
+            get_parameterless_sub_dependant(depends=depends, path=path),
+        )
+    body_params = _get_flat_body_params(dependant)
+    embed_body_fields = _should_embed_body_fields(body_params)
+    return dependant, body_params, embed_body_fields
+
+
+class _RouteWithPath(Protocol):
+    path: str
+
+
+def _get_fastapi_scope(scope: Scope) -> dict[str, Any]:
+    fastapi_scope = scope.setdefault(_FASTAPI_SCOPE_KEY, {})
+    assert isinstance(fastapi_scope, dict)
+    return fastapi_scope
+
+
+def _update_scope(scope: Scope, child_scope: Scope) -> None:
+    fastapi_child_scope = child_scope.get(_FASTAPI_SCOPE_KEY)
+    for key, value in child_scope.items():
+        if key != _FASTAPI_SCOPE_KEY:
+            scope[key] = value
+    if isinstance(fastapi_child_scope, dict):
+        _get_fastapi_scope(scope).update(fastapi_child_scope)
+
+
+def _get_scope_effective_route_context(scope: Scope) -> Any | None:
+    return scope.get(_FASTAPI_SCOPE_KEY, {}).get(_FASTAPI_EFFECTIVE_ROUTE_CONTEXT_KEY)
+
+
+def _get_scope_included_router(scope: Scope) -> Any | None:
+    return scope.get(_FASTAPI_SCOPE_KEY, {}).get(_FASTAPI_INCLUDED_ROUTER_KEY)
+
+
+def _frontend_scope_specificity(scope: Scope) -> int | None:
+    specificity = scope.get(_FASTAPI_SCOPE_KEY, {}).get(
+        _FASTAPI_FRONTEND_SPECIFICITY_KEY
+    )
+    if isinstance(specificity, int):
+        return specificity
+    return None
+
+
+def _restore_fastapi_scope_key(scope: Scope, key: str, previous: Any) -> None:
+    fastapi_scope = scope.get(_FASTAPI_SCOPE_KEY)
+    if not isinstance(fastapi_scope, dict):
+        return
+    if previous is _SCOPE_MISSING:
+        fastapi_scope.pop(key, None)
+    else:
+        fastapi_scope[key] = previous
+
+
+class _APIRouteLike(Protocol):
+    path: str
+    endpoint: Callable[..., Any]
+    stream_item_type: Any | None
+    response_model: Any
+    summary: str | None
+    response_description: str
+    deprecated: bool | None
+    operation_id: str | None
+    response_model_include: IncEx | None
+    response_model_exclude: IncEx | None
+    response_model_by_alias: bool
+    response_model_exclude_unset: bool
+    response_model_exclude_defaults: bool
+    response_model_exclude_none: bool
+    include_in_schema: bool
+    response_class: type[Response] | DefaultPlaceholder
+    dependency_overrides_provider: Any | None
+    callbacks: list[BaseRoute] | None
+    openapi_extra: dict[str, Any] | None
+    generate_unique_id_function: Callable[[Any], str] | DefaultPlaceholder
+    strict_content_type: bool | DefaultPlaceholder
+    tags: list[str | Enum]
+    responses: dict[int | str, dict[str, Any]]
+    name: str
+    path_regex: Any
+    path_format: str
+    param_convertors: dict[str, Any]
+    methods: set[str]
+    unique_id: str
+    status_code: int | None
+    response_field: ModelField | None
+    stream_item_field: ModelField | None
+    dependencies: list[params.Depends]
+    description: str
+    response_fields: dict[int | str, ModelField]
+    dependant: Dependant
+    _embed_body_fields: bool
+    body_field: ModelField | None
+    is_sse_stream: bool
+    is_json_stream: bool
+
+
+def _populate_api_route_state(
+    route: _APIRouteLike,
+    path: str,
+    endpoint: Callable[..., Any],
+    *,
+    response_model: Any = Default(None),
+    status_code: int | None = None,
+    tags: list[str | Enum] | None = None,
+    dependencies: Sequence[params.Depends] | None = None,
+    summary: str | None = None,
+    description: str | None = None,
+    response_description: str = "Successful Response",
+    responses: dict[int | str, dict[str, Any]] | None = None,
+    deprecated: bool | None = None,
+    name: str | None = None,
+    methods: set[str] | list[str] | None = None,
+    operation_id: str | None = None,
+    response_model_include: IncEx | None = None,
+    response_model_exclude: IncEx | None = None,
+    response_model_by_alias: bool = True,
+    response_model_exclude_unset: bool = False,
+    response_model_exclude_defaults: bool = False,
+    response_model_exclude_none: bool = False,
+    include_in_schema: bool = True,
+    response_class: type[Response] | DefaultPlaceholder = Default(JSONResponse),
+    dependency_overrides_provider: Any | None = None,
+    callbacks: list[BaseRoute] | None = None,
+    openapi_extra: dict[str, Any] | None = None,
+    generate_unique_id_function: Callable[[Any], str] | DefaultPlaceholder = Default(
+        generate_unique_id
+    ),
+    strict_content_type: bool | DefaultPlaceholder = Default(True),
+    stream_item_type: Any | None = None,
+) -> None:
+    route.path = path
+    route.endpoint = endpoint
+    route.stream_item_type = stream_item_type
+    route.summary = summary
+    route.response_description = response_description
+    route.deprecated = deprecated
+    route.operation_id = operation_id
+    route.response_model_include = response_model_include
+    route.response_model_exclude = response_model_exclude
+    route.response_model_by_alias = response_model_by_alias
+    route.response_model_exclude_unset = response_model_exclude_unset
+    route.response_model_exclude_defaults = response_model_exclude_defaults
+    route.response_model_exclude_none = response_model_exclude_none
+    route.include_in_schema = include_in_schema
+    route.response_class = response_class
+    route.dependency_overrides_provider = dependency_overrides_provider
+    route.callbacks = callbacks
+    route.openapi_extra = openapi_extra
+    route.generate_unique_id_function = generate_unique_id_function
+    route.strict_content_type = strict_content_type
+    route.tags = tags or []
+    route.responses = responses or {}
+    route.name = get_name(endpoint) if name is None else name
+    route.path_regex, route.path_format, route.param_convertors = compile_path(path)
+    if methods is None:
+        methods = ["GET"]
+    route.methods = {method.upper() for method in methods}
+    if isinstance(generate_unique_id_function, DefaultPlaceholder):
+        current_generate_unique_id: Callable[[Any], str] = (
+            generate_unique_id_function.value
+        )
+    else:
+        current_generate_unique_id = generate_unique_id_function
+    route.unique_id = route.operation_id or current_generate_unique_id(route)
+    # normalize enums e.g. http.HTTPStatus
+    if isinstance(status_code, IntEnum):
+        status_code = int(status_code)
+    route.status_code = status_code
+    route.dependencies = list(dependencies or [])
+    route.description = description or inspect.cleandoc(route.endpoint.__doc__ or "")
+    # if a "form feed" character (page break) is found in the description text,
+    # truncate description text to the content preceding the first "form feed"
+    route.description = route.description.split("\f")[0].strip()
+    response_fields = {}
+    for additional_status_code, response in route.responses.items():
+        assert isinstance(response, dict), "An additional response must be a dict"
+        model = response.get("model")
+        if model:
+            assert is_body_allowed_for_status_code(additional_status_code), (
+                f"Status code {additional_status_code} must not have a response body"
+            )
+            response_name = f"Response_{additional_status_code}_{route.unique_id}"
+            response_field = create_model_field(
+                name=response_name, type_=model, mode="serialization"
+            )
+            response_fields[additional_status_code] = response_field
+    if response_fields:
+        route.response_fields = response_fields
+    else:
+        route.response_fields = {}
+
+    assert callable(endpoint), "An endpoint must be a callable"
+    (
+        route.dependant,
+        body_params,
+        route._embed_body_fields,
+    ) = _build_dependant_with_parameterless_dependencies(
+        path=route.path_format,
+        call=route.endpoint,
+        dependencies=route.dependencies,
+    )
+    route.body_field = _get_body_field(
+        body_params=body_params,
+        name=route.unique_id,
+        embed_body_fields=route._embed_body_fields,
+    )
+    # Detect generator endpoints that should stream as JSONL or SSE
+    is_generator = _is_async_gen_callable(route.dependant.call) or _is_gen_callable(
+        route.dependant.call
+    )
+    route.is_sse_stream = is_generator and lenient_issubclass(
+        response_class, EventSourceResponse
+    )
+    route.is_json_stream = is_generator and isinstance(
+        response_class, DefaultPlaceholder
+    )
+    if isinstance(response_model, DefaultPlaceholder):
+        return_annotation = get_typed_return_annotation(endpoint)
+        if lenient_issubclass(return_annotation, Response):
+            response_model = None
+        else:
+            stream_item = get_stream_item_type(return_annotation)
+            if stream_item is not None and is_generator:
+                # Extract item type for JSONL or SSE streaming for
+                # generator endpoints when response_class is
+                # DefaultPlaceholder (JSONL) or EventSourceResponse (SSE).
+                # ServerSentEvent is excluded: it's a transport
+                # wrapper, not a data model, so it shouldn't feed
+                # into validation or OpenAPI schema generation.
+                if (
+                    isinstance(response_class, DefaultPlaceholder)
+                    or lenient_issubclass(response_class, EventSourceResponse)
+                ) and not lenient_issubclass(stream_item, ServerSentEvent):
+                    route.stream_item_type = stream_item
+                response_model = None
+            else:
+                response_model = return_annotation
+    route.response_model = response_model
+    if route.response_model:
+        assert is_body_allowed_for_status_code(status_code), (
+            f"Status code {status_code} must not have a response body"
+        )
+        response_name = "Response_" + route.unique_id
+        route.response_field = create_model_field(
+            name=response_name,
+            type_=route.response_model,
+            mode="serialization",
+        )
+    else:
+        route.response_field = None
+    if route.stream_item_type:
+        stream_item_name = "StreamItem_" + route.unique_id
+        route.stream_item_field = create_model_field(
+            name=stream_item_name,
+            type_=route.stream_item_type,
+            mode="serialization",
+        )
+    else:
+        route.stream_item_field = None
+
+
+class APIRoute(routing.Route):
+    stream_item_type: Any | None
+    response_model: Any
+    summary: str | None
+    response_description: str
+    deprecated: bool | None
+    operation_id: str | None
+    response_model_include: IncEx | None
+    response_model_exclude: IncEx | None
+    response_model_by_alias: bool
+    response_model_exclude_unset: bool
+    response_model_exclude_defaults: bool
+    response_model_exclude_none: bool
+    include_in_schema: bool
+    response_class: type[Response] | DefaultPlaceholder
+    dependency_overrides_provider: Any | None
+    callbacks: list[BaseRoute] | None
+    openapi_extra: dict[str, Any] | None
+    generate_unique_id_function: Callable[[Any], str] | DefaultPlaceholder
+    strict_content_type: bool | DefaultPlaceholder
+    tags: list[str | Enum]
+    responses: dict[int | str, dict[str, Any]]
+    unique_id: str
+    status_code: int | None
+    response_field: ModelField | None
+    stream_item_field: ModelField | None
+    dependencies: list[params.Depends]
+    description: str
+    response_fields: dict[int | str, ModelField]
+    dependant: Dependant
+    _embed_body_fields: bool
+    body_field: ModelField | None
+    is_sse_stream: bool
+    is_json_stream: bool
+
+    def __init__(
+        self,
+        path: str,
+        endpoint: Callable[..., Any],
+        *,
+        response_model: Any = Default(None),
+        status_code: int | None = None,
+        tags: list[str | Enum] | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
+        summary: str | None = None,
+        description: str | None = None,
+        response_description: str = "Successful Response",
+        responses: dict[int | str, dict[str, Any]] | None = None,
+        deprecated: bool | None = None,
+        name: str | None = None,
+        methods: set[str] | list[str] | None = None,
+        operation_id: str | None = None,
+        response_model_include: IncEx | None = None,
+        response_model_exclude: IncEx | None = None,
+        response_model_by_alias: bool = True,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        include_in_schema: bool = True,
+        response_class: type[Response] | DefaultPlaceholder = Default(JSONResponse),
+        dependency_overrides_provider: Any | None = None,
+        callbacks: list[BaseRoute] | None = None,
+        openapi_extra: dict[str, Any] | None = None,
+        generate_unique_id_function: Callable[["APIRoute"], str]
+        | DefaultPlaceholder = Default(generate_unique_id),
+        strict_content_type: bool | DefaultPlaceholder = Default(True),
+    ) -> None:
+        _populate_api_route_state(
+            cast(_APIRouteLike, self),
+            path,
+            endpoint,
+            response_model=response_model,
+            status_code=status_code,
+            tags=tags,
+            dependencies=dependencies,
+            summary=summary,
+            description=description,
+            response_description=response_description,
+            responses=responses,
+            deprecated=deprecated,
+            name=name,
+            methods=methods,
+            operation_id=operation_id,
+            response_model_include=response_model_include,
+            response_model_exclude=response_model_exclude,
+            response_model_by_alias=response_model_by_alias,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            include_in_schema=include_in_schema,
+            response_class=response_class,
+            dependency_overrides_provider=dependency_overrides_provider,
+            callbacks=callbacks,
+            openapi_extra=openapi_extra,
+            generate_unique_id_function=generate_unique_id_function,
+            strict_content_type=strict_content_type,
+        )
+        self.app = request_response(self.get_route_handler())
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        route = cast(_APIRouteLike, self)
+        # TODO: Replace or deprecate this no-scope hook so included-route
+        # effective context can be passed explicitly instead of via ContextVar.
+        effective_context = _effective_route_context_var.get()
+        if effective_context is not None and effective_context.original_route is self:
+            route = cast(_APIRouteLike, effective_context)
+        return get_request_handler(
+            dependant=route.dependant,
+            body_field=route.body_field,
+            status_code=route.status_code,
+            response_class=route.response_class,
+            response_field=route.response_field,
+            response_model_include=route.response_model_include,
+            response_model_exclude=route.response_model_exclude,
+            response_model_by_alias=route.response_model_by_alias,
+            response_model_exclude_unset=route.response_model_exclude_unset,
+            response_model_exclude_defaults=route.response_model_exclude_defaults,
+            response_model_exclude_none=route.response_model_exclude_none,
+            dependency_overrides_provider=route.dependency_overrides_provider,
+            embed_body_fields=route._embed_body_fields,
+            strict_content_type=route.strict_content_type,
+            stream_item_field=route.stream_item_field,
+            is_json_stream=route.is_json_stream,
+        )
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        effective_context = _get_scope_effective_route_context(scope)
+        if effective_context is not None and effective_context.original_route is self:
+            match, child_scope = effective_context.matches(scope)
+        else:
+            match, child_scope = super().matches(scope)
+        if match != Match.NONE:
+            child_scope["route"] = self
+        return match, child_scope
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        effective_context = _get_scope_effective_route_context(scope)
+        if effective_context is not None and effective_context.original_route is self:
+            methods = effective_context.methods
+            if methods and scope["method"] not in methods:
+                headers = {"Allow": ", ".join(methods)}
+                if "app" in scope:
+                    raise HTTPException(status_code=405, headers=headers)
+                response = PlainTextResponse(
+                    "Method Not Allowed", status_code=405, headers=headers
+                )
+                await response(scope, receive, send)
+                return
+            assert effective_context.app is not None
+            await effective_context.app(scope, receive, send)
+            return
+        await super().handle(scope, receive, send)
+
+# Source: fastapi/routing.py (lines 2791-2906)
+    async def app(self, scope: Scope, receive: Receive, send: Send) -> None:
+        assert scope["type"] in ("http", "websocket", "lifespan")
+
+        if "router" not in scope:
+            scope["router"] = self
+
+        if scope["type"] == "lifespan":
+            await self.lifespan(scope, receive, send)
+            return
+
+        partial: tuple[BaseRoute, Scope] | None = None
+        for route in self.routes:
+            match, child_scope = route.matches(scope)
+            if match == Match.FULL:
+                scope.update(child_scope)
+                _route_selected(
+                    scope=scope,
+                    path=getattr(route, "path_format", None),
+                    mount=isinstance(route, routing.Mount),
+                )
+                await route.handle(scope, receive, send)
+                return
+            if match == Match.PARTIAL and partial is None:
+                partial = (route, child_scope)
+
+        if partial is not None:
+            route, child_scope = partial
+            scope.update(child_scope)
+            _route_selected(
+                scope=scope,
+                path=getattr(route, "path_format", None),
+                mount=isinstance(route, routing.Mount),
+            )
+            await route.handle(scope, receive, send)
+            return
+
+        route_path = get_route_path(scope)
+        if scope["type"] == "http" and self.redirect_slashes and route_path != "/":
+            redirect_scope = dict(scope)
+            if route_path.endswith("/"):
+                redirect_scope["path"] = redirect_scope["path"].rstrip("/")
+            else:
+                redirect_scope["path"] = redirect_scope["path"] + "/"
+
+            for route in self.routes:
+                match, _ = route.matches(redirect_scope)
+                if match != Match.NONE:
+                    if scope.get("fastapi.telemetry") is not None:
+                        telemetry_route: BaseRoute | _EffectiveRouteContext | None = (
+                            route
+                        )
+                        while isinstance(telemetry_route, _IncludedRouter):
+                            _, _, matched_route, matched_context = (
+                                telemetry_route._match(redirect_scope)
+                            )
+                            telemetry_route = (
+                                matched_context.starlette_route or matched_context
+                                if matched_context is not None
+                                else matched_route
+                            )
+                        _route_selected(
+                            scope=scope,
+                            path=getattr(telemetry_route, "path_format", None),
+                        )
+                    redirect_url = URL(scope=redirect_scope)
+                    response = RedirectResponse(url=str(redirect_url))
+                    await response(scope, receive, send)
+                    return
+
+        (
+            low_priority_match,
+            low_priority_scope,
+            low_priority_route,
+            low_priority_context,
+        ) = self._match_low_priority(scope)
+        if low_priority_match != Match.NONE and low_priority_route is not None:
+            _update_scope(scope, low_priority_scope)
+            _route_selected(
+                scope=scope,
+                path=getattr(
+                    low_priority_context or low_priority_route, "path_format", None
+                ),
+            )
+            if low_priority_context is not None:
+                _get_fastapi_scope(scope)[_FASTAPI_EFFECTIVE_ROUTE_CONTEXT_KEY] = (
+                    low_priority_context
+                )
+                original_route = low_priority_context.original_route
+                if isinstance(original_route, APIRoute):
+                    scope["route"] = original_route
+                    await original_route.handle(scope, receive, send)
+                    return
+            await low_priority_route.handle(scope, receive, send)
+            return
+
+        await self.default(scope, receive, send)
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        included_router = _get_scope_included_router(scope)
+        if (
+            isinstance(included_router, _IncludedRouter)
+            and included_router.original_router is self
+        ):
+            await included_router._handle_selected(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        included_router = _get_scope_included_router(scope)
+        if (
+            isinstance(included_router, _IncludedRouter)
+            and included_router.original_router is self
+        ):
+            match, child_scope, _, _ = included_router._match(scope)
+            return match, child_scope
+        return Match.NONE, {}
+
+# Source: fastapi/routing.py (lines 2994-3138)
+    def add_api_route(
+        self,
+        path: str,
+        endpoint: Callable[..., Any],
+        *,
+        response_model: Any = Default(None),
+        status_code: int | None = None,
+        tags: list[str | Enum] | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
+        summary: str | None = None,
+        description: str | None = None,
+        response_description: str = "Successful Response",
+        responses: dict[int | str, dict[str, Any]] | None = None,
+        deprecated: bool | None = None,
+        methods: set[str] | list[str] | None = None,
+        operation_id: str | None = None,
+        response_model_include: IncEx | None = None,
+        response_model_exclude: IncEx | None = None,
+        response_model_by_alias: bool = True,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        include_in_schema: bool = True,
+        response_class: type[Response] | DefaultPlaceholder = Default(JSONResponse),
+        name: str | None = None,
+        route_class_override: type[APIRoute] | None = None,
+        callbacks: list[BaseRoute] | None = None,
+        openapi_extra: dict[str, Any] | None = None,
+        generate_unique_id_function: Callable[[APIRoute], str]
+        | DefaultPlaceholder = Default(generate_unique_id),
+        strict_content_type: bool | DefaultPlaceholder = Default(True),
+    ) -> None:
+        route_class = route_class_override or self.route_class
+        responses = responses or {}
+        combined_responses = {**self.responses, **responses}
+        current_response_class = get_value_or_default(
+            response_class, self.default_response_class
+        )
+        current_tags = self.tags.copy()
+        if tags:
+            current_tags.extend(tags)
+        current_dependencies = self.dependencies.copy()
+        if dependencies:
+            current_dependencies.extend(dependencies)
+        current_callbacks = self.callbacks.copy()
+        if callbacks:
+            current_callbacks.extend(callbacks)
+        current_generate_unique_id = get_value_or_default(
+            generate_unique_id_function, self.generate_unique_id_function
+        )
+        route = route_class(
+            self.prefix + path,
+            endpoint=endpoint,
+            response_model=response_model,
+            status_code=status_code,
+            tags=current_tags,
+            dependencies=current_dependencies,
+            summary=summary,
+            description=description,
+            response_description=response_description,
+            responses=combined_responses,
+            deprecated=deprecated or self.deprecated,
+            methods=methods,
+            operation_id=operation_id,
+            response_model_include=response_model_include,
+            response_model_exclude=response_model_exclude,
+            response_model_by_alias=response_model_by_alias,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            include_in_schema=include_in_schema and self.include_in_schema,
+            response_class=current_response_class,
+            name=name,
+            dependency_overrides_provider=self.dependency_overrides_provider,
+            callbacks=current_callbacks,
+            openapi_extra=openapi_extra,
+            generate_unique_id_function=current_generate_unique_id,
+            strict_content_type=get_value_or_default(
+                strict_content_type, self.strict_content_type
+            ),
+        )
+        self.routes.append(route)
+        self._mark_routes_changed()
+
+    def api_route(
+        self,
+        path: str,
+        *,
+        response_model: Any = Default(None),
+        status_code: int | None = None,
+        tags: list[str | Enum] | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
+        summary: str | None = None,
+        description: str | None = None,
+        response_description: str = "Successful Response",
+        responses: dict[int | str, dict[str, Any]] | None = None,
+        deprecated: bool | None = None,
+        methods: list[str] | None = None,
+        operation_id: str | None = None,
+        response_model_include: IncEx | None = None,
+        response_model_exclude: IncEx | None = None,
+        response_model_by_alias: bool = True,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        include_in_schema: bool = True,
+        response_class: type[Response] = Default(JSONResponse),
+        name: str | None = None,
+        callbacks: list[BaseRoute] | None = None,
+        openapi_extra: dict[str, Any] | None = None,
+        generate_unique_id_function: Callable[[APIRoute], str] = Default(
+            generate_unique_id
+        ),
+    ) -> Callable[[DecoratedCallable], DecoratedCallable]:
+        def decorator(func: DecoratedCallable) -> DecoratedCallable:
+            self.add_api_route(
+                path,
+                func,
+                response_model=response_model,
+                status_code=status_code,
+                tags=tags,
+                dependencies=dependencies,
+                summary=summary,
+                description=description,
+                response_description=response_description,
+                responses=responses,
+                deprecated=deprecated,
+                methods=methods,
+                operation_id=operation_id,
+                response_model_include=response_model_include,
+                response_model_exclude=response_model_exclude,
+                response_model_by_alias=response_model_by_alias,
+                response_model_exclude_unset=response_model_exclude_unset,
+                response_model_exclude_defaults=response_model_exclude_defaults,
+                response_model_exclude_none=response_model_exclude_none,
+                include_in_schema=include_in_schema,
+                response_class=response_class,
+                name=name,
+                callbacks=callbacks,
+                openapi_extra=openapi_extra,
+                generate_unique_id_function=generate_unique_id_function,
+            )
+            return func
+
+        return decorator
+
+# Source: fastapi/applications.py (lines 1032-1083)
+    def build_middleware_stack(self) -> ASGIApp:
+        # Duplicate/override from Starlette to add AsyncExitStackMiddleware
+        # inside of ExceptionMiddleware, inside of custom user middlewares
+        debug = self.debug
+        error_handler = None
+        exception_handlers: dict[Any, ExceptionHandler] = {}
+
+        for key, value in self.exception_handlers.items():
+            if key in (500, Exception):
+                error_handler = value
+            else:
+                exception_handlers[key] = value
+
+        middleware = (
+            [
+                Middleware(ServerErrorMiddleware, handler=error_handler, debug=debug),
+                Middleware(ExceptionTelemetryMiddleware),
+            ]
+            + self.user_middleware
+            + [
+                Middleware(
+                    ExceptionMiddleware,
+                    handlers=exception_handlers,
+                    debug=debug,
+                ),
+                # Add FastAPI-specific AsyncExitStackMiddleware for closing files.
+                # Before this was also used for closing dependencies with yield but
+                # those now have their own AsyncExitStack, to properly support
+                # streaming responses while keeping compatibility with the previous
+                # versions (as of writing 0.117.1) that allowed doing
+                # except HTTPException inside a dependency with yield.
+                # This needs to happen after user middlewares because those create a
+                # new contextvars context copy by using a new AnyIO task group.
+                # This AsyncExitStack preserves the context for contextvars, not
+                # strictly necessary for closing files but it was one of the original
+                # intentions.
+                # If the AsyncExitStack lived outside of the custom middlewares and
+                # contextvars were set, for example in a dependency with 'yield'
+                # in that internal contextvars context, the values would not be
+                # available in the outer context of the AsyncExitStack.
+                # By placing the middleware and the AsyncExitStack here, inside all
+                # user middlewares, the same context is used.
+                # This is currently not needed, only for closing files, but used to be
+                # important when dependencies with yield were closed here.
+                Middleware(AsyncExitStackMiddleware),
+            ]
+        )
+
+        app = self.router
+        for cls, args, kwargs in reversed(middleware):
+            app = cls(app, *args, **kwargs)
+        return app
+
+# Source: fastapi/applications.py (lines 1175-1262)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.root_path:
+            scope["root_path"] = self.root_path
+        if scope["type"] == "lifespan":
+            from fastapi.telemetry._runtime import lifespan
+
+            await lifespan(
+                config=self._telemetry,
+                app=super().__call__,
+                scope=scope,
+                receive=receive,
+                send=send,
+            )
+            return
+        if (
+            scope["type"] not in ("http", "websocket")
+            or "fastapi.telemetry" in scope
+            or not self._native_telemetry.enabled()
+        ):
+            await super().__call__(scope, receive, send)
+            return
+        if self.middleware_stack is None:
+            self.middleware_stack = self.build_middleware_stack()
+        scope["app"] = self
+        await self._native_telemetry(
+            app=super().__call__,
+            scope=scope,
+            receive=receive,
+            send=send,
+            legacy_otel=_legacy_otel(self.middleware_stack),
+        )
+
+    def add_api_route(
+        self,
+        path: str,
+        endpoint: Callable[..., Any],
+        *,
+        response_model: Any = Default(None),
+        status_code: int | None = None,
+        tags: list[str | Enum] | None = None,
+        dependencies: Sequence[Depends] | None = None,
+        summary: str | None = None,
+        description: str | None = None,
+        response_description: str = "Successful Response",
+        responses: dict[int | str, dict[str, Any]] | None = None,
+        deprecated: bool | None = None,
+        methods: list[str] | None = None,
+        operation_id: str | None = None,
+        response_model_include: IncEx | None = None,
+        response_model_exclude: IncEx | None = None,
+        response_model_by_alias: bool = True,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        include_in_schema: bool = True,
+        response_class: type[Response] | DefaultPlaceholder = Default(JSONResponse),
+        name: str | None = None,
+        openapi_extra: dict[str, Any] | None = None,
+        generate_unique_id_function: Callable[[routing.APIRoute], str] = Default(
+            generate_unique_id
+        ),
+    ) -> None:
+        self.router.add_api_route(
+            path,
+            endpoint=endpoint,
+            response_model=response_model,
+            status_code=status_code,
+            tags=tags,
+            dependencies=dependencies,
+            summary=summary,
+            description=description,
+            response_description=response_description,
+            responses=responses,
+            deprecated=deprecated,
+            methods=methods,
+            operation_id=operation_id,
+            response_model_include=response_model_include,
+            response_model_exclude=response_model_exclude,
+            response_model_by_alias=response_model_by_alias,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            include_in_schema=include_in_schema,
+            response_class=response_class,
+            name=name,
+            openapi_extra=openapi_extra,
+            generate_unique_id_function=generate_unique_id_function,
+        )
+
+# Source: fastapi/applications.py (lines 4725-4769)
+    def middleware(
+        self,
+        middleware_type: Annotated[
+            str,
+            Doc(
+                """
+                The type of middleware. Currently only supports `http`.
+                """
+            ),
+        ],
+    ) -> Callable[[DecoratedCallable], DecoratedCallable]:
+        """
+        Add a middleware to the application.
+
+        Read more about it in the
+        [FastAPI docs for Middleware](https://fastapi.tiangolo.com/tutorial/middleware/).
+
+        ## Example
+
+        ```python
+        import time
+        from typing import Awaitable, Callable
+
+        from fastapi import FastAPI, Request, Response
+
+        app = FastAPI()
+
+
+        @app.middleware("http")
+        async def add_process_time_header(
+            request: Request, call_next: Callable[[Request], Awaitable[Response]]
+        ) -> Response:
+            start_time = time.time()
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            response.headers["X-Process-Time"] = str(process_time)
+            return response
+        ```
+        """
+
+        def decorator(func: DecoratedCallable) -> DecoratedCallable:
+            self.add_middleware(BaseHTTPMiddleware, dispatch=func)
+            return func
+
+        return decorator
+
+# Source: fastapi/middleware/asyncexitstack.py (lines 1-18)
+from contextlib import AsyncExitStack
+
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+
+# Used mainly to close files after the request is done, dependencies are closed
+# in their own AsyncExitStack
+class AsyncExitStackMiddleware:
+    def __init__(
+        self, app: ASGIApp, context_name: str = "fastapi_middleware_astack"
+    ) -> None:
+        self.app = app
+        self.context_name = context_name
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async with AsyncExitStack() as stack:
+            scope[self.context_name] = stack
+            await self.app(scope, receive, send)
+
+# Source: docs_src/middleware/tutorial001_py310.py (lines 1-14)
+import time
+
+from fastapi import FastAPI, Request
+
+app = FastAPI()
+
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time = time.perf_counter() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
+
+# Source: docs_src/custom_request_and_route/tutorial003_py310.py (lines 1-39)
+import time
+from collections.abc import Callable
+
+from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi.routing import APIRoute
+
+
+class TimedRoute(APIRoute):
+    def get_route_handler(self) -> Callable:
+        original_route_handler = super().get_route_handler()
+
+        async def custom_route_handler(request: Request) -> Response:
+            before = time.time()
+            response: Response = await original_route_handler(request)
+            duration = time.time() - before
+            response.headers["X-Response-Time"] = str(duration)
+            print(f"route duration: {duration}")
+            print(f"route response: {response}")
+            print(f"route response headers: {response.headers}")
+            return response
+
+        return custom_route_handler
+
+
+app = FastAPI()
+router = APIRouter(route_class=TimedRoute)
+
+
+@app.get("/")
+async def not_timed():
+    return {"message": "Not timed"}
+
+
+@router.get("/timed")
+async def timed():
+    return {"message": "It's the time of my life"}
+
+
+app.include_router(router)
+
+# Source: tests/test_custom_middleware_exception.py (lines 1-96)
+from pathlib import Path
+
+from fastapi import APIRouter, FastAPI, File, UploadFile
+from fastapi.exceptions import HTTPException
+from fastapi.testclient import TestClient
+from starlette.types import ASGIApp
+
+app = FastAPI()
+
+router = APIRouter()
+
+
+class ContentSizeLimitMiddleware:
+    """Content size limiting middleware for ASGI applications
+    Args:
+      app (ASGI application): ASGI application
+      max_content_size (optional): the maximum content size allowed in bytes, None for no limit
+    """
+
+    def __init__(self, app: ASGIApp, max_content_size: int | None = None):
+        self.app = app
+        self.max_content_size = max_content_size
+
+    def receive_wrapper(self, receive):
+        received = 0
+
+        async def inner():
+            nonlocal received
+            message = await receive()
+            if message["type"] != "http.request":
+                return message  # pragma: no cover
+
+            body_len = len(message.get("body", b""))
+            received += body_len
+            assert self.max_content_size is not None
+            if received > self.max_content_size:
+                raise HTTPException(
+                    422,
+                    detail={
+                        "name": "ContentSizeLimitExceeded",
+                        "code": 999,
+                        "message": "File limit exceeded",
+                    },
+                )
+            return message
+
+        return inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or self.max_content_size is None:
+            await self.app(scope, receive, send)
+            return
+
+        wrapper = self.receive_wrapper(receive)
+        await self.app(scope, wrapper, send)
+
+
+@router.post("/middleware")
+def run_middleware(file: UploadFile = File(..., description="Big File")):
+    return {"message": "OK"}
+
+
+app.include_router(router)
+app.add_middleware(ContentSizeLimitMiddleware, max_content_size=2**8)
+
+
+client = TestClient(app)
+
+
+def test_custom_middleware_exception(tmp_path: Path):
+    default_pydantic_max_size = 2**16
+    path = tmp_path / "test.txt"
+    path.write_bytes(b"x" * (default_pydantic_max_size + 1))
+
+    with client:
+        with open(path, "rb") as file:
+            response = client.post("/middleware", files={"file": file})
+        assert response.status_code == 422, response.text
+        assert response.json() == {
+            "detail": {
+                "name": "ContentSizeLimitExceeded",
+                "code": 999,
+                "message": "File limit exceeded",
+            }
+        }
+
+
+def test_custom_middleware_exception_not_raised(tmp_path: Path):
+    path = tmp_path / "test.txt"
+    path.write_bytes(b"<file content>")
+
+    with client:
+        with open(path, "rb") as file:
+            response = client.post("/middleware", files={"file": file})
+        assert response.status_code == 200, response.text
+        assert response.json() == {"message": "OK"}
+
+# Source: tests/test_tutorial/test_custom_request_and_route/test_tutorial003.py (lines 1-32)
+import importlib
+
+import pytest
+from fastapi.testclient import TestClient
+
+from tests.utils import needs_py310
+
+
+@pytest.fixture(
+    name="client",
+    params=[
+        pytest.param("tutorial003_py310", marks=needs_py310),
+    ],
+)
+def get_client(request: pytest.FixtureRequest):
+    mod = importlib.import_module(f"docs_src.custom_request_and_route.{request.param}")
+
+    client = TestClient(mod.app)
+    return client
+
+
+def test_get(client: TestClient):
+    response = client.get("/")
+    assert response.json() == {"message": "Not timed"}
+    assert "X-Response-Time" not in response.headers
+
+
+def test_get_timed(client: TestClient):
+    response = client.get("/timed")
+    assert response.json() == {"message": "It's the time of my life"}
+    assert "X-Response-Time" in response.headers
+    assert float(response.headers["X-Response-Time"]) >= 0
