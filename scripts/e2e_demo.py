@@ -142,7 +142,7 @@ class Demo:
                 print(f"Workspace rate limit: resuming in {int(wait) + 1} seconds.", flush=True)
                 time.sleep(wait)
 
-    def turns(self, run_id):
+    def turns(self, run_id, *, require_faults=False):
         rows = []
         terminal = False
         mode = decision = None
@@ -166,17 +166,22 @@ class Demo:
                                 "ttft_ms", "measured_ttft_ms", "charge_micros", "royalty_json", "fault_injected_ms", "sla_breach", "mode")})
                 elif event == "done":
                     terminal = payload["run_id"] == run_id and payload["status"] == "completed"
-        check(terminal and mode == self.mode and decision == "buy", f"No completed live Buy run for {run_id}.")
-        check(len(rows) >= 10 and len({r["turn"] for r in rows}) == len(rows) == len({r["id"] for r in rows})
-              and all(r["mode"] == self.mode and r["prompt_tokens"] > 0 and r["output_tokens"] > 0 for r in rows),
-              "Expected at least ten distinct live metered turns.")
-        check(all(any(r["royalty_json"].get(p, 0) > 0 for r in rows) for p in self.publishers.values()),
-              "Real metering must attribute positive royalties to each published layer.")
+        # A stream can end before its terminal event. Retry that read against the same run.
+        check(terminal, f"No completed event for {run_id}. Resume with the same journal.")
+        if mode != self.mode or decision != "buy":
+            raise FailedRun(f"Completed run {run_id} did not use the required {self.mode} Buy mode.", rows)
+        if not (len(rows) >= 10 and len({r["turn"] for r in rows}) == len(rows) == len({r["id"] for r in rows})
+                and all(r["mode"] == self.mode and r["prompt_tokens"] > 0 and r["output_tokens"] > 0 for r in rows)):
+            raise FailedRun("Expected at least ten distinct live metered turns.", rows)
+        if not all(any(r["royalty_json"].get(p, 0) > 0 for r in rows) for p in self.publishers.values()):
+            raise FailedRun("Real metering must attribute positive royalties to each published layer.", rows)
+        if require_faults:
+            check_injected_faults(rows)
         return rows
 
     def session_turns(self, s):
         try:
-            return self.turns(s["run_id"])
+            return self.turns(s["run_id"], require_faults=s["purpose"] == "acceptance")
         except FailedRun as exc:
             s.update(failure={"at":now(), "reason":str(exc)}, turns=exc.rows)
             suite = self.data.get("acceptance_suite")
@@ -270,9 +275,6 @@ class Demo:
             self.journal.save()
         rows = self.session_turns(s)
         faults = [r for r in rows if r["fault_injected_ms"]]
-        if purpose == "acceptance":
-            check(len(faults) == 3 and all(r["sla_breach"] and r["ttft_ms"] >= 1200 for r in faults),
-                  "Expected three observed delays that breached the SLA.")
         s["turns"] = rows
         self.journal.save()
         if mandate["status"] not in SETTLED:
@@ -346,15 +348,18 @@ class Demo:
         target["accepted"] = now()
         self.journal.save()
 
-    def acceptance(self, repeats):
+    def acceptance(self, repeats, *, new_suite=False):
         # Start with enough pre-existing real earnings that refunds cannot strand one recipient below a cent.
         accepted = lambda: sum(1 for s in self.sessions if s.get("accepted"))
         suite = self.data.get("acceptance_suite")
+        if suite and suite.get("completed") and not new_suite:
+            return
         if not suite or suite.get("completed"):
-            suite = {"started":now(), "initial":accepted(), "repeats":repeats}
+            suite = {"started":now(), "initial":accepted(), "repeats":repeats, "mode":self.mode}
             self.data["acceptance_suite"] = suite
             self.journal.save()
         check(repeats == suite["repeats"], "Resume the suite using its original repeat count.")
+        check(suite.get("mode", self.mode) == self.mode, "Resume the suite using its original inference mode.")
         while accepted() < suite["initial"] + repeats:
             unfinished = pending_acceptance(self.sessions)
             if unfinished is None:
@@ -385,24 +390,51 @@ class FailedRun(RuntimeError):
         super().__init__(message)
 
 
+def check_injected_faults(rows):
+    faults = [r for r in rows if r["fault_injected_ms"]]
+    if len(faults) != 3 or not all(r["sla_breach"] and r["ttft_ms"] >= 1200 for r in faults):
+        raise FailedRun("Expected three observed delays that breached the SLA.", rows)
+
+
 class RateLimit(RuntimeError):
     def __init__(self, delay, route):
         self.delay, self.route = delay, route
         super().__init__(f"Rate limited on {route}. Retry after {delay}s.")
 
 
-def execute(args, action):
+def exported_suite(path, data):
+    try:
+        report = json.loads(path.read_bytes())
+    except (FileNotFoundError, ValueError):
+        return False
+    return (isinstance(report, dict) and report.get("workspace_id") == data["workspace_id"]
+            and report.get("acceptance_suite") == data["acceptance_suite"])
+
+
+def execute(args, action=None):
     os.umask(0o077)
-    config = settings()
-    payment = args.payment or config.get("E2E_PAYMENT") or "wallet"
-    check(payment in {"wallet", "card"}, "E2E_PAYMENT must be wallet or card.")
-    url = origin(args.api or config.get("PUBLIC_API_URL") or "http://127.0.0.1:8000")
-    token = require(config, "ADMIN_TOKEN")
-    with PayPalClient(config) as pp, httpx.Client(base_url=url, headers={"X-Admin-Token":token},
-                follow_redirects=False, timeout=httpx.Timeout(240, connect=10)) as api, locked_journal(args.state, "operator-demo") as state:
-        demo = Demo(state, api, pp, config, payment, getattr(args, "require_mode", "live"))
-        demo.connect(url)
-        action(demo)
+    with locked_journal(args.state, "operator-demo") as state:
+        report = args.state.with_name(args.state.stem + "-evidence.json")
+        suite = state.data.get("acceptance_suite") or {}
+        completed = action is None and suite.get("completed")
+        start_new = completed and args.new_suite and exported_suite(report, state.data)
+        if completed and not start_new:
+            # A lost final export (even when resuming --new-suite) needs only this journal.
+            print("Writing evidence for the completed suite from its private journal.")
+        else:
+            config = settings()
+            payment = args.payment or config.get("E2E_PAYMENT") or "wallet"
+            check(payment in {"wallet", "card"}, "E2E_PAYMENT must be wallet or card.")
+            url = origin(args.api or config.get("PUBLIC_API_URL") or "http://127.0.0.1:8000")
+            token = require(config, "ADMIN_TOKEN")
+            with PayPalClient(config) as pp, httpx.Client(base_url=url, headers={"X-Admin-Token":token},
+                        follow_redirects=False, timeout=httpx.Timeout(240, connect=10)) as api:
+                demo = Demo(state, api, pp, config, payment, getattr(args, "require_mode", "live"))
+                demo.connect(url)
+                if action is None:
+                    demo.acceptance(args.repeats, new_suite=bool(start_new))
+                else:
+                    action(demo)
         summary = {k:state.data[k] for k in ("workspace_id", "health", "warm", "sessions")}
         summary.update(traffic="Operator-run sandbox test traffic", generated_at=now())
         if state.data.get("acceptance_suite"):
@@ -411,9 +443,11 @@ def execute(args, action):
             summary["seed"] = state.data["seed"]
         if state.data.get("smoke"):
             summary["smoke"] = state.data["smoke"]
-        report = args.state.with_name(args.state.stem + "-evidence.json")
         save_report(report, summary)
         print(f"Real test evidence: {report}")
+        if completed and not start_new:
+            check(suite["repeats"] == args.repeats and suite.get("mode", state.data["health"]["mode"]) == args.require_mode,
+                  "The exported suite used a different repeat count or inference mode. Select --new-suite for a new acceptance.")
 
 
 def arguments(parser):
@@ -433,9 +467,12 @@ if __name__ == "__main__":
     parser = arguments(argparse.ArgumentParser(description=__doc__))
     parser.add_argument("--require-mode", choices=["live", "hosted"], default="live", help="Demand this actual GPU mode throughout the run.")
     parser.add_argument("--repeats", type=int, default=3, choices=range(1, 4))
-    parser.add_argument("--smoke", action="store_true", help="One live session, then full reconciliation.")
+    operation = parser.add_mutually_exclusive_group()
+    operation.add_argument("--new-suite", action="store_true",
+                           help="Start another paid acceptance suite after exporting the previous result.")
+    operation.add_argument("--smoke", action="store_true", help="One live session, then full reconciliation.")
     args = parser.parse_args()
     try:
-        execute(args, smoke if args.smoke else lambda demo: demo.acceptance(args.repeats))
+        execute(args, smoke if args.smoke else None)
     except (RuntimeError, ValueError, httpx.HTTPError, OSError) as exc:
         parser.exit(1, str(exc) + "\n")
