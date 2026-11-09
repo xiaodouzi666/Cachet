@@ -1417,6 +1417,12 @@ td {
 
 .royalty-widget .royalty-scope {
   display: block;
-  font: 400 0.72rem var(--sans);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 400;
   color: var(--muted);
+}
+
+.recording nextjs-portal {
+  display: none;
 }
