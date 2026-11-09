@@ -1,5 +1,5 @@
 {
-  "schema": 2,
+  "schema": 6,
   "task_id": "route-class",
   "source": "starlette",
   "buy": true,
@@ -14,20 +14,21 @@
     "cold_fraction": 0.25
   },
   "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
-  "tenant": "d57314ba",
-  "output_limit": 150,
-  "signature": "ce6ff37cd487c671a6835d6a3e64d809be1fdb2017778a4a4136c3e018963d9e",
+  "tenant": "fb9d2590",
+  "output_limit": 640,
+  "signature": "f547a8bc5841c6529f65539fc19c18cd3854c16be459757da5779516f83aaf5e",
   "turns": [
     {
       "kind": "result",
-      "prompt_tokens": 12164,
+      "prompt_tokens": 12363,
       "cached_tokens": 12005,
-      "ttft_ms": 70.236,
-      "engine_ttft_ms": 70.235,
+      "ttft_ms": 131.015,
+      "engine_ttft_ms": 131.014,
       "fault_injected_ms": 0.0,
-      "total_ms": 1253.259,
-      "output_tokens": 150,
-      "text": "The chosen strategy involves a tradeoff between computation and cold start times. The inference options suggest a balance where:\n\n- **Cold Start Time (TTFT)**: 1743.186 ms (cold) vs 29.177 ms (warm).\n- **Compute Time**: 38974 \u03bcs vs 17988 \u03bcs.\n- **Tokens**: 11992 vs 17988.\n\nThe strategy chosen (buy) likely aims to minimize cold start times by prioritizing warm TTFT (29.177 ms) over cold TTFT (1743.186 ms), even though it incurs more compute time (",
+      "total_ms": 1525.355,
+      "output_tokens": 176,
+      "finish_reason": "stop",
+      "text": "The strategy involves a cold start cost of 17,432 microdollars, which is higher than the compute cost of 38,974 microdollars, indicating that optimizing the cold start is crucial. We will subclass `Route` to add custom headers and handle async requests, ensuring efficient response handling and header injection. \n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse, PlainTextResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        return JSONResponse({\"pong\": True}, headers=MutableHeaders({\"X-Route-Class\": \"custom\"}))\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 1,
       "spans": [
         {
@@ -46,28 +47,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 12164
+          "start": 12017,
+          "end": 12363
         }
       ],
-      "input_hash": "33c542fdde04b8a0502f239498283045c9986704642514646529962932c18756",
+      "input_hash": "f1bd080184f933d00e5f428dff4107d3b35022d6d376ab123dd77941f95fb17a",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 12366,
-      "cached_tokens": 12313,
-      "ttft_ms": 50.301,
-      "engine_ttft_ms": 50.3,
+      "prompt_tokens": 12801,
+      "cached_tokens": 12539,
+      "ttft_ms": 113.859,
+      "engine_ttft_ms": 113.858,
       "fault_injected_ms": 0.0,
-      "total_ms": 1237.689,
-      "output_tokens": 150,
-      "text": "### Feature Requirements for Custom Route Class in Starlette\n\n1. **Route Matching**:\n   - The route class should be able to match incoming requests based on the path and HTTP method.\n   - It should support partial matches to handle \"405 Method Not Allowed\" cases.\n\n2. **Endpoint Handling**:\n   - The route class should handle both synchronous and asynchronous endpoints.\n   - It should support different types of endpoints, such as functions, classes, and WebSocket endpoints.\n\n3. **Middleware Integration**:\n   - The route class should allow middleware to be applied to the route.\n   - It should support middleware for request body limits, error handling, etc.\n\n4. **Lifespan Management**:\n   - The route class should",
+      "total_ms": 1835.385,
+      "output_tokens": 215,
+      "finish_reason": "stop",
+      "text": "### Feature Requirements and Measurable Acceptance Conditions\n\n- **Feature**: Implement a custom route in Starlette that handles GET requests to `/ping` and returns JSON response `{\"pong\": True}`.\n- **Acceptance Conditions**:\n  - The route should add the header `X-Route-Class: custom` to the response.\n  - The route should be registered with the Starlette application.\n  - The application should respond with `{\"pong\": True}` when accessing `/ping`.\n  - The response should include the header `X-Route-Class: custom`.\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        return JSONResponse({\"pong\": True}, headers=MutableHeaders({\"X-Route-Class\": \"custom\"}))\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 2,
       "spans": [
         {
@@ -86,28 +88,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 12366
+          "start": 12017,
+          "end": 12801
         }
       ],
-      "input_hash": "b1f009b94b0743d971dae9718383906fc5e2b926cfd00b3b859597a5b2937cac",
+      "input_hash": "af3381c89e213b95783345cb6a739151c0133e591b94b838c68e3d49eca9013f",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 12570,
-      "cached_tokens": 12515,
-      "ttft_ms": 48.596,
-      "engine_ttft_ms": 48.595,
+      "prompt_tokens": 13280,
+      "cached_tokens": 13016,
+      "ttft_ms": 116.073,
+      "engine_ttft_ms": 116.072,
       "fault_injected_ms": 0.0,
-      "total_ms": 1241.317,
-      "output_tokens": 150,
-      "text": "### Relevant Framework Classes in Starlette\n\n1. **Router Class**:\n   - Located in `starlette/routing.py`.\n   - Manages a collection of routes and handles incoming requests by matching them to the appropriate route.\n\n2. **Route Class**:\n   - Located in `starlette/routing.py`.\n   - Represents a single route and handles matching requests to the endpoint.\n\n3. **WebSocketRoute Class**:\n   - Located in `starlette/routing.py`.\n   - Similar to the Route class but specifically for WebSocket requests.\n\n4. **Mount Class**:\n   - Located in `starlette/routing.py`.\n   - Allows mounting sub-applications or routes under a specific path.\n\n5. **Host Class**:\n  ",
+      "total_ms": 871.132,
+      "output_tokens": 94,
+      "finish_reason": "stop",
+      "text": "### Locate Relevant Framework Classes\n\nThe relevant classes are:\n- `Starlette` from `starlette.applications`\n- `Route` from `starlette.routing`\n- `JSONResponse` from `starlette.responses`\n- `MutableHeaders` from `starlette.datastructures`\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n```",
       "turn": 3,
       "spans": [
         {
@@ -126,28 +129,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 12570
+          "start": 12017,
+          "end": 13280
         }
       ],
-      "input_hash": "baf701246fb58dc3e8102c6a8b1d4b22b20b3abbcf84b36f090491006c89d19d",
+      "input_hash": "5205e4dfca98de7e2c6ac33f829afa02a5b30f4d513ff05347ee4aa2eabfef3c",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 12771,
-      "cached_tokens": 12719,
-      "ttft_ms": 48.959,
-      "engine_ttft_ms": 48.958,
+      "prompt_tokens": 13635,
+      "cached_tokens": 13374,
+      "ttft_ms": 117.829,
+      "engine_ttft_ms": 117.828,
       "fault_injected_ms": 0.0,
-      "total_ms": 1247.232,
-      "output_tokens": 150,
-      "text": "### Request Path Tracing Through Starlette Classes\n\n1. **Router Class**:\n   - Manages the collection of routes and handles incoming requests.\n   - Located in `starlette/routing.py`.\n\n2. **Request Handling**:\n   - When a request comes in, it is passed to the `Router` via the `__call__` method.\n   - The `Router` checks if the request matches any of the mounted routes or sub-applications.\n\n3. **Route Matching**:\n   - If a match is found, the request is passed to the matched route's `handle` method.\n   - If no match is found, it falls back to the default route (e.g., 404 handler).\n\n4.",
+      "total_ms": 1500.988,
+      "output_tokens": 170,
+      "finish_reason": "stop",
+      "text": "### Trace the Request Path\n\n1. **Starlette** receives the request.\n2. **Router** matches the request to the registered route.\n3. **CustomRoute** handles the request.\n4. **endpoint** returns `JSONResponse`.\n5. **MutableHeaders** sets `X-Route-Class: custom`.\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({\"pong\": True}, headers=MutableHeaders({\"X-Route-Class\": \"custom\"}))\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```",
       "turn": 4,
       "spans": [
         {
@@ -166,28 +170,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 12771
+          "start": 12017,
+          "end": 13635
         }
       ],
-      "input_hash": "25b43f791c23bcec7a7d751c90265397f2960f8906d6d56d9299324b02b175fd",
+      "input_hash": "affc6cb38f554d6e281345fc89395625c06c88ab2da27a0a2cb58941ad818ef3",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 12974,
-      "cached_tokens": 12920,
-      "ttft_ms": 49.373,
-      "engine_ttft_ms": 49.373,
+      "prompt_tokens": 14068,
+      "cached_tokens": 13805,
+      "ttft_ms": 120.273,
+      "engine_ttft_ms": 120.273,
       "fault_injected_ms": 0.0,
-      "total_ms": 1253.642,
-      "output_tokens": 150,
-      "text": "### Designing a Custom Route Class in Starlette\n\n#### Step 5: Design the Smallest Change\n\n1. **Create a Custom Route Class**:\n   - Extend the `Route` class from `starlette/routing.py`.\n   - Override the `matches` and `url_path_for` methods to customize route matching and URL generation.\n\n2. **Implement Custom Matching Logic**:\n   - Override `matches` to include custom logic for matching requests.\n   - Override `url_path_for` to generate custom URLs based on the route's requirements.\n\n3. **Add Middleware Support**:\n   - Ensure the custom route class can support middleware by integrating with the existing middleware framework.\n\n4. **Example Custom Route Class**:\n\n```python\n",
+      "total_ms": 1204.48,
+      "output_tokens": 132,
+      "finish_reason": "stop",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    def __init__(self):\n        super().__init__(\"/ping\", self.endpoint)\n\n    async def endpoint(self, request):\n        response = JSONResponse({\"pong\": True}, headers=MutableHeaders({\"X-Route-Class\": \"custom\"}))\n        return response\n\napp = Starlette(routes=[CustomRoute()])\n```\nThis code defines a custom route that handles GET requests to `/ping`, returns a JSON response, and adds a custom header.",
       "turn": 5,
       "spans": [
         {
@@ -206,28 +211,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 12974
+          "start": 12017,
+          "end": 14068
         }
       ],
-      "input_hash": "022fce79f308764288414a7c94728bc49e5c33d885d326767ebc8da9f7b9f7df",
+      "input_hash": "a88bfa8b63c70b870329dfbd21567784eb5bff9a7db3ce6884229883c9de60be",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13173,
-      "cached_tokens": 13123,
-      "ttft_ms": 49.531,
-      "engine_ttft_ms": 49.53,
+      "prompt_tokens": 14628,
+      "cached_tokens": 14200,
+      "ttft_ms": 176.748,
+      "engine_ttft_ms": 176.747,
       "fault_injected_ms": 0.0,
-      "total_ms": 1257.061,
-      "output_tokens": 150,
-      "text": "### Core Python Implementation for a Custom Route Class\n\n1. **Extend the `Route` Class**:\n   - Create a custom route class that extends `Route` from `starlette/routing.py`.\n\n2. **Override `matches` Method**:\n   - Implement custom logic for matching requests.\n\n3. **Override `url_path_for` Method**:\n   - Implement custom logic for generating URLs.\n\n4. **Integrate Middleware**:\n   - Ensure the custom route can support middleware.\n\nHere is the implementation:\n\n```python\nfrom starlette.routing import Route\n\nclass CustomRoute(Route):\n    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs):\n        super().__init__(path, endpoint, **kwargs",
+      "total_ms": 1616.927,
+      "output_tokens": 173,
+      "finish_reason": "stop",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(scope=message)\n                headers['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({\"pong\": True})\n\napp = Starlette(routes=[CustomRoute(\"/ping\", endpoint=ping)])\n```\nThis module defines a custom route that handles GET requests to `/ping`, adds the `X-Route-Class: custom` header, and returns a JSON response.",
       "turn": 6,
       "spans": [
         {
@@ -246,28 +252,30 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 13173
+          "start": 12017,
+          "end": 14628
         }
       ],
-      "input_hash": "ae8fae580099a3962b161575d663c21c3e70e9bd588d349b6ee0f75c9f4bb782",
-      "mode": "live"
+      "input_hash": "353c747b6da5da24cf882c803f0625bebe1babd82e6c8beada6691e3ee7d45e4",
+      "mode": "live",
+      "http_feedback": "HTTP smoke passed: {\"status_codes\": [200, 404, 200], \"subclass_probe\": true, \"success_body\": {\"pong\": true}, \"x_route_class\": \"custom\"}"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13376,
-      "cached_tokens": 13322,
-      "ttft_ms": 53.819,
-      "engine_ttft_ms": 53.818,
+      "prompt_tokens": 15127,
+      "cached_tokens": 14801,
+      "ttft_ms": 142.031,
+      "engine_ttft_ms": 142.03,
       "fault_injected_ms": 0.0,
-      "total_ms": 1268.489,
-      "output_tokens": 150,
-      "text": "### Show How an Application Registers and Exercises the Custom Route Implementation\n\n1. **Register the Custom Route**:\n   - Define the custom route and register it with the `Router`.\n\n2. **Exercise the Custom Route**:\n   - Use the custom route in a Starlette application to handle requests.\n\nHere is an example:\n\n```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Router, Route\n\n# Define the custom route class\nclass CustomRoute(Route):\n    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs):\n        super().__init__(path, endpoint, **kwargs)\n\n    def matches(self, scope: Scope) -> tuple[Match, Scope]:\n        # Custom matching",
+      "total_ms": 1600.619,
+      "output_tokens": 173,
+      "finish_reason": "stop",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(scope=message)\n                headers['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({\"pong\": True})\n\napp = Starlette(routes=[CustomRoute(\"/ping\", endpoint=ping)])\n```\nThis module defines a custom route that handles GET requests to `/ping`, adds the `X-Route-Class: custom` header, and returns a JSON response.",
       "turn": 7,
       "spans": [
         {
@@ -286,28 +294,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 13376
+          "start": 12017,
+          "end": 15127
         }
       ],
-      "input_hash": "f11715b879507ebef4352bc1dc524e03d042a3c68c4476647b1ec4f335f57d5c",
+      "input_hash": "7d567e5d51f6dc6af839cb84def8d8b0c361b9b0314bd50bcf3549e07c8f33e9",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13577,
-      "cached_tokens": 13525,
-      "ttft_ms": 49.912,
-      "engine_ttft_ms": 49.911,
+      "prompt_tokens": 15565,
+      "cached_tokens": 15300,
+      "ttft_ms": 125.538,
+      "engine_ttft_ms": 125.537,
       "fault_injected_ms": 0.0,
-      "total_ms": 1270.59,
-      "output_tokens": 150,
-      "text": "### Write a Test for the Successful Path\n\n1. **Set Up the Test Environment**:\n   - Use `TestClient` from `starlette.testclient` to simulate HTTP requests.\n\n2. **Register the Custom Route**:\n   - Define the custom route and register it with the `Router`.\n\n3. **Exercise the Custom Route**:\n   - Use the custom route in a Starlette application to handle requests.\n\n4. **Write the Test**:\n   - Use `TestClient` to send a request and assert the expected response.\n\nHere is an example:\n\n```python\nfrom starlette.testclient import TestClient\nfrom starlette.applications import Starlette\nfrom starlette.routing import Router, Route\n\n# Define the custom route",
+      "total_ms": 730.194,
+      "output_tokens": 72,
+      "finish_reason": "stop",
+      "text": "To check the successful path, send HTTP GET requests to `/ping` and `/`:\n\n1. **GET /ping**: Expect status code 200 and JSON response `{\"pong\": true}`.\n2. **GET /**: Expect status code 404 (not found).\n\nThese checks ensure the custom route and endpoint are functioning correctly.",
       "turn": 8,
       "spans": [
         {
@@ -326,28 +335,29 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 13577
+          "start": 12017,
+          "end": 15565
         }
       ],
-      "input_hash": "9102b4e580d163fac0faa9e16a18baaefd6d72fd635d7995d188bc0baae950a4",
+      "input_hash": "ed782cee1e89690d7c2f5e11a289258c3e01d9717c4ef760bac3d2b1f27da74f",
       "mode": "live"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13783,
-      "cached_tokens": 13726,
-      "ttft_ms": 50.478,
-      "engine_ttft_ms": 50.477,
+      "prompt_tokens": 16056,
+      "cached_tokens": 15611,
+      "ttft_ms": 185.591,
+      "engine_ttft_ms": 185.591,
       "fault_injected_ms": 0.0,
-      "total_ms": 1276.329,
-      "output_tokens": 150,
-      "text": "### Write a Test for an Edge Case and Explain the Expected Behavior\n\n1. **Set Up the Test Environment**:\n   - Use `TestClient` from `starlette.testclient` to simulate HTTP requests.\n\n2. **Register the Custom Route**:\n   - Define the custom route and register it with the `Router`.\n\n3. **Exercise the Custom Route**:\n   - Use the custom route in a Starlette application to handle requests.\n\n4. **Write the Test for an Edge Case**:\n   - Test a scenario that exercises the edge case, such as a malformed URL or an unsupported HTTP method.\n\n5. **Explain the Expected Behavior**:\n   - Describe what the application should do in the edge case scenario.\n\nHere is",
+      "total_ms": 1670.618,
+      "output_tokens": 173,
+      "finish_reason": "stop",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(scope=message)\n                headers['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({\"pong\": True})\n\napp = Starlette(routes=[CustomRoute(\"/ping\", endpoint=ping)])\n```\n\nThis module defines a custom route that handles GET requests to `/ping`, adds the `X-Route-Class: custom` header, and returns a JSON response.",
       "turn": 9,
       "spans": [
         {
@@ -366,28 +376,30 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 13783
+          "start": 12017,
+          "end": 16056
         }
       ],
-      "input_hash": "a9471ca964451835915b9be8705f02125dc616a1edc86f8c0d0a67ec22d091ed",
-      "mode": "live"
+      "input_hash": "d132f7f08fa0b26ef90734e403dc547f6a0cdaacbf9896856717d0407736ebfb",
+      "mode": "live",
+      "http_feedback": "HTTP smoke passed: {\"status_codes\": [200, 404, 200], \"subclass_probe\": true, \"success_body\": {\"pong\": true}, \"x_route_class\": \"custom\"}"
     },
     {
       "kind": "result",
-      "prompt_tokens": 13992,
-      "cached_tokens": 13932,
-      "ttft_ms": 50.762,
-      "engine_ttft_ms": 50.761,
+      "prompt_tokens": 16755,
+      "cached_tokens": 16229,
+      "ttft_ms": 222.878,
+      "engine_ttft_ms": 222.877,
       "fault_injected_ms": 0.0,
-      "total_ms": 1281.735,
-      "output_tokens": 150,
-      "text": "### Review and Summarize the Implementation\n\n1. **Custom Route Class Implementation**:\n   - Extended the `Route` class to include custom matching and URL generation logic.\n   - Ensured the custom route can support middleware.\n\n2. **Test for Successful Path**:\n   - Created a `TestClient` to simulate a request to the custom route.\n   - Asserted the expected response from the custom route.\n\n3. **Test for Edge Case**:\n   - Tested a scenario with a malformed URL or unsupported HTTP method.\n   - Ensured the application handles the edge case gracefully (e.g., returns a 404 or 405 error).\n\n4. **Summary**:\n   - The custom route class successfully routes requests",
+      "total_ms": 1440.623,
+      "output_tokens": 140,
+      "finish_reason": "stop",
+      "text": "```python\nfrom starlette.applications import Starlette\nfrom starlette.routing import Route\nfrom starlette.responses import JSONResponse\nfrom starlette.datastructures import MutableHeaders\n\nclass CustomRoute(Route):\n    async def handle(self, scope, receive, send):\n        async def wrapped_send(message):\n            if message['type'] == 'http.response.start':\n                headers = MutableHeaders(scope=message)\n                headers['X-Route-Class'] = 'custom'\n            await send(message)\n        await super().handle(scope, receive, wrapped_send)\n\nasync def ping(request):\n    return JSONResponse({\"pong\": True})\n\napp = Starlette(routes=[CustomRoute(\"/ping\", endpoint=ping)])\n```",
       "turn": 10,
       "spans": [
         {
@@ -406,18 +418,37 @@
           "kind": "private",
           "owner": "salt",
           "start": 12005,
-          "end": 12016
+          "end": 12017
         },
         {
           "kind": "private",
           "owner": "turns",
-          "start": 12016,
-          "end": 13992
+          "start": 12017,
+          "end": 16755
         }
       ],
-      "input_hash": "0e334e87e818343a66a3f965c515cc4d91e1e7f2df811fdafc33857380005e57",
+      "input_hash": "435e158d52935599d546f34e7450c8cabf62b27893f8894f3dc8251488f9000e",
       "mode": "live"
     }
   ],
-  "recorded_at": "2026-11-09T06:12:35.917250+00:00"
+  "recorded_at": "2026-11-09T06:39:45.856200+00:00",
+  "application_check": {
+    "answer_sha256": "52b8c1b913e43f0f337d21c02fc61100bdb9ad327d7c4c798fd2e9fa699f742b",
+    "requested_format_met": true,
+    "source_sha256": "fd09bce4886c7f139909ac3d142faf6463d0a27289de2ae5dac589da084c9195",
+    "http": {
+      "status_codes": [
+        200,
+        404,
+        200
+      ],
+      "subclass_probe": true,
+      "success_body": {
+        "pong": true
+      },
+      "x_route_class": "custom"
+    },
+    "status": "passed"
+  },
+  "verified_application_turn": 10
 }

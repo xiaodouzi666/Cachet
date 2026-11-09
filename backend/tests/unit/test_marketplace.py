@@ -344,3 +344,30 @@ def test_only_an_explicit_final_rounding_subsidy_releases_uncaptured_royalties(
             )
             == share
         )
+
+
+def test_terminal_check_survives_workspace_state_reload(tmp_path):
+    from backend.app.api.finance import saved_application_check
+    from backend.app.models import AgentRun
+    from backend.app.operations import RunEvent
+    from backend.app.replay.recordings import application_evidence
+
+    receipt = application_evidence(load("route-class", True))
+    engine = init_db(f"sqlite:///{tmp_path}/terminal.db")
+    with session_scope(engine) as db:
+        ws = workspace(db, "judge")
+        call, _, _ = archived_call(db, ws, layer(db, ws, "starlette"))
+        run = db.get(AgentRun, call.run_id)
+        assert (
+            saved_application_check(db, run)["application_check"]["status"]
+            == "unverified"
+        )
+        db.add(
+            RunEvent(
+                run_id=run.id,
+                event_type="done",
+                payload={"run_id": run.id, "status": "completed", **receipt},
+            )
+        )
+    with session_scope(engine, write=False) as db:
+        assert saved_application_check(db, db.get(AgentRun, run.id)) == receipt

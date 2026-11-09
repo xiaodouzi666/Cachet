@@ -5,48 +5,116 @@
       "task": "rate-limit",
       "decision": "buy",
       "turns": 10,
+      "generated_application_check": {
+        "answer_sha256": "9f018c85c617d76624baa3d9fe0e5fad66a39bfad4a51dd3598c905aaeaf5147",
+        "requested_format_met": false,
+        "source_sha256": "dd252fe42cba2cd580391d2f39ba8ffa54d93fd28ee3c4ad8afb1b28b5ef186a",
+        "http": {
+          "distinct_clients": 2,
+          "status_codes": [
+            200,
+            200,
+            429,
+            200,
+            200
+          ],
+          "success_body": {
+            "pong": true
+          },
+          "window_seconds": 60
+        },
+        "status": "passed"
+      },
+      "verified_application_turn": 10,
       "source": "backend/app/replay/traces/rate-limit-buy.json",
-      "first_ttft_ms": 97.182,
-      "median_ttft_ms": 79.988,
-      "cached_tokens": 269039,
-      "output_tokens": 1500,
-      "priced_usage_micros": 43542,
+      "first_ttft_ms": 192.252,
+      "median_ttft_ms": 183.909,
+      "cached_tokens": 275915,
+      "output_tokens": 1229,
+      "priced_usage_micros": 45957,
       "publisher_royalty_micros": 10360
     },
     {
       "task": "rate-limit",
       "decision": "compute",
       "turns": 10,
+      "generated_application_check": {
+        "answer_sha256": "9f018c85c617d76624baa3d9fe0e5fad66a39bfad4a51dd3598c905aaeaf5147",
+        "requested_format_met": false,
+        "source_sha256": "dd252fe42cba2cd580391d2f39ba8ffa54d93fd28ee3c4ad8afb1b28b5ef186a",
+        "http": {
+          "distinct_clients": 2,
+          "status_codes": [
+            200,
+            200,
+            429,
+            200,
+            200
+          ],
+          "success_body": {
+            "pong": true
+          },
+          "window_seconds": 60
+        },
+        "status": "passed"
+      },
+      "verified_application_turn": 10,
       "source": "backend/app/replay/traces/rate-limit-compute.json",
-      "first_ttft_ms": 8240.952,
-      "median_ttft_ms": 82.032,
-      "cached_tokens": 243032,
-      "output_tokens": 1500,
-      "priced_usage_micros": 53966,
+      "first_ttft_ms": 8338.7,
+      "median_ttft_ms": 183.255,
+      "cached_tokens": 249739,
+      "output_tokens": 1227,
+      "priced_usage_micros": 56291,
       "publisher_royalty_micros": 0
     },
     {
       "task": "route-class",
       "decision": "buy",
       "turns": 10,
+      "generated_application_check": {
+        "answer_sha256": "52b8c1b913e43f0f337d21c02fc61100bdb9ad327d7c4c798fd2e9fa699f742b",
+        "requested_format_met": true,
+        "source_sha256": "fd09bce4886c7f139909ac3d142faf6463d0a27289de2ae5dac589da084c9195",
+        "http": {
+          "status_codes": [
+            200,
+            404,
+            200
+          ],
+          "subclass_probe": true,
+          "success_body": {
+            "pong": true
+          },
+          "x_route_class": "custom"
+        },
+        "status": "passed"
+      },
+      "verified_application_turn": 10,
       "source": "backend/app/replay/traces/route-class-buy.json",
-      "first_ttft_ms": 70.236,
-      "median_ttft_ms": 50.106,
-      "cached_tokens": 130100,
-      "output_tokens": 1500,
-      "priced_usage_micros": 22659,
+      "first_ttft_ms": 131.015,
+      "median_ttft_ms": 128.276,
+      "cached_tokens": 140880,
+      "output_tokens": 1518,
+      "priced_usage_micros": 26524,
       "publisher_royalty_micros": 4800
     },
     {
       "task": "route-class",
       "decision": "compute",
       "turns": 10,
+      "generated_application_check": {
+        "answer_sha256": "99a9a32a533a5fe8c5c21e4aa5ece9ca6d23a27c4cc4ce45db2a14b1b203ef43",
+        "requested_format_met": true,
+        "status": "failed",
+        "reason": "AssertionError: Unexpected route response 500, header=None"
+      },
+      "verified_application_turn": null,
       "source": "backend/app/replay/traces/route-class-compute.json",
-      "first_ttft_ms": 2958.621,
-      "median_ttft_ms": 49.291,
-      "cached_tokens": 118095,
-      "output_tokens": 1500,
-      "priced_usage_micros": 27461,
+      "first_ttft_ms": 3030.002,
+      "median_ttft_ms": 132.208,
+      "cached_tokens": 129224,
+      "output_tokens": 1591,
+      "priced_usage_micros": 31466,
       "publisher_royalty_micros": 0
     }
   ]

@@ -36,7 +36,7 @@ from backend.app.models import (
     Refund,
     Workspace,
 )
-from backend.app.operations import Control
+from backend.app.operations import Control, RunEvent
 from backend.app.money import usd_to_micros
 from backend.app.gateway.modes import health
 from backend.app.gateway.sglang_client import Engine
@@ -125,6 +125,36 @@ def fields(obj, names):
     return {name: getattr(obj, name) for name in names.split()}
 
 
+def saved_application_check(db, run):
+    done = (
+        db.scalar(
+            select(RunEvent.payload)
+            .where(RunEvent.run_id == run.id, RunEvent.event_type == "done")
+            .order_by(RunEvent.id.desc())
+            .limit(1)
+        )
+        if run.status == "completed"
+        else None
+    )
+    if done and "application_check" in done:
+        return {
+            k: done[k]
+            for k in (
+                "application_check",
+                "verified_application_turn",
+                "earlier_application_check",
+            )
+            if k in done
+        }
+    return {
+        "application_check": {
+            "status": "unverified",
+            "reason": "This run has no saved HTTP verification.",
+        },
+        "verified_application_turn": None,
+    }
+
+
 @router.get("/judge/state")
 def state(ws=wsdep):
     with session_scope(write=False) as db:
@@ -146,6 +176,7 @@ def state(ws=wsdep):
             fields(run, "id mandate_id task_id status mode quote_json") if run else None
         )
         if latest_run:
+            latest_run.update(saved_application_check(db, run))
             latest_run["operator_seeded"] = (
                 run.id in provenance["operator_seed_run_ids"]
             )
@@ -254,7 +285,9 @@ def fault(body: Fault, ws=wsdep):
 @router.post("/judge/flush-cache")
 def flush(ws=wsdep):
     if health()["mode"] != "live":
-        raise HTTPException(409, "The judge flush control requires the primary live GPU")
+        raise HTTPException(
+            409, "The judge flush control requires the primary live GPU"
+        )
     with session_scope() as db:
         throttle(db, ws, "flush")
         limit(db, ["global-cache-flush"], 1, 600)

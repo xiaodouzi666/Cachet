@@ -31,7 +31,7 @@ from backend.app.models import (
     utcnow,
 )
 from backend.app.operations import Control, RunEvent
-from backend.app.replay.recordings import load
+from backend.app.replay.recordings import application_evidence, load
 from backend.app.settlement.service import capture, ensure_payer_link, lock
 
 router = APIRouter(prefix="/api", dependencies=[Depends(admin)])
@@ -285,11 +285,17 @@ def execute(ws, identifier, context_id, tenant):
                     )
                 }
             )
+            checked_track = None
             engine = Engine(mode) if mode in {"live", "hosted"} else None
             try:
                 profile = checked_profile(engine) if mode == "hosted" else calibration()
-                if mode == "hosted" and fingerprint(profile) != config["calibration_id"]:
-                    raise ValueError("Hosted calibration changed after this run was quoted.")
+                if (
+                    mode == "hosted"
+                    and fingerprint(profile) != config["calibration_id"]
+                ):
+                    raise ValueError(
+                        "Hosted calibration changed after this run was quoted."
+                    )
                 if engine is not None:
                     prefix = Prefix(engine, ctx.slug)
                     turns = live_turns(
@@ -303,16 +309,10 @@ def execute(ws, identifier, context_id, tenant):
                         fault_source=lambda: next_fault(ws),
                     )
                 else:
-                    turns = replay_turns(
-                        load(
-                            task_id,
-                            buy,
-                            source_chain=source_chain,
-                            request_quote=config,
-                        ),
-                        owners,
-                        lambda: next_fault(ws),
+                    checked_track = load(
+                        task_id, buy, source_chain=source_chain, request_quote=config
                     )
+                    turns = replay_turns(checked_track, owners, lambda: next_fault(ws))
                 for meter in ensure_budget_before_next(turns, ws, mid, rates):
                     if engine is not None:
                         meter["mode"] = mode
@@ -346,7 +346,16 @@ def execute(ws, identifier, context_id, tenant):
                 r = owned(db, AgentRun, identifier, ws)
                 r.status = "completed"
                 r.ended_at = utcnow()
-                emit(db, identifier, "done", {"run_id": identifier, "status": r.status})
+                emit(
+                    db,
+                    identifier,
+                    "done",
+                    {
+                        "run_id": identifier,
+                        "status": r.status,
+                        **application_evidence(checked_track),
+                    },
+                )
     except Exception as exc:
         from backend.app.paypal.client import PayPalError
 
@@ -415,11 +424,15 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
             3600,
         )
         layers = chain(db, ctx)
-        q = quote(sum(c.token_len for c in layers), len(STEPS), body.cold_fraction, profile)
+        q = quote(
+            sum(c.token_len for c in layers), len(STEPS), body.cold_fraction, profile
+        )
         if mode == "hosted":
             q["calibration_id"] = fingerprint(profile)
             if q["calibration_id"] != serving.get("calibration_id"):
-                raise HTTPException(503, "Hosted calibration changed. Request a fresh quote.")
+                raise HTTPException(
+                    503, "Hosted calibration changed. Request a fresh quote."
+                )
         if mode == "replay":
             load(
                 key,
@@ -499,12 +512,17 @@ def events(identifier: str, ws=wsdep, last_event_id: int = Header(default=0)):
 
 
 @router.get("/reference-turn")
-def archived_reference_turn():
+def archived_reference_turn(task_id: str = "rate-limit", decision: str = "buy"):
     """An inspectable historical GPU measurement separate from all workspace activity."""
-    track = load("rate-limit", True)
+    if task_id not in TASKS or decision not in {"buy", "compute"}:
+        raise HTTPException(422, "Select a recorded task and a buy or compute decision")
+    track = load(task_id, decision == "buy")
     row = track["turns"][0]
     return {
         "task_id": track["task_id"],
+        "decision": decision,
+        "final_turn": len(track["turns"]),
+        **application_evidence(track),
         "recorded_at": track["recorded_at"],
         "model": track["model"],
         "mode": "recorded",

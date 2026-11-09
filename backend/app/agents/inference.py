@@ -1,4 +1,4 @@
-from backend.app.agents.tasks import STEPS, turn_question
+from backend.app.agents.tasks import MAX_OUTPUT_TOKENS, STEPS, turn_question
 from backend.app.config import manifest
 from backend.app.gateway.prompt_builder import token_hash
 
@@ -11,14 +11,22 @@ def live_turns(
     task,
     buy,
     quote_text,
-    max_output=150,
+    max_output=MAX_OUTPUT_TOKENS,
     fault_source=None,
+    check_proposal=None,
 ):
     messages = []
+    http_feedback = None
     for i, step in enumerate(STEPS):
-        question = turn_question(task, i, step)
-        if i == 0:
-            question += "\nQuote: " + quote_text
+        question = turn_question(
+            task,
+            i,
+            step,
+            quote_text=quote_text,
+            previous=messages[-1][1] if messages else "",
+            http_feedback=http_feedback,
+        )
+        http_feedback = None
         messages.append(("user", question))
         prompt = prefix.build(engine, owners, tenant, messages, buy)
         if len(prompt.ids) + max_output > manifest()["context_window"]:
@@ -43,5 +51,8 @@ def live_turns(
             input_hash=token_hash(prompt.ids),
             mode="live",
         )
+        if check_proposal and i in (5, 8):
+            http_feedback = check_proposal(result["text"])
+            result["http_feedback"] = http_feedback
         messages.append(("assistant", result["text"]))
         yield {"kind": "result", **result}

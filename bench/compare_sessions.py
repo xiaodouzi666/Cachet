@@ -27,6 +27,8 @@ def compare(task, buy):
         task=task,
         decision="buy" if buy else "compute",
         turns=len(turns),
+        generated_application_check=track["application_check"],
+        verified_application_turn=track["verified_application_turn"],
         source=path(task, buy).relative_to(ROOT).as_posix(),
         first_ttft_ms=turns[0]["ttft_ms"],
         median_ttft_ms=round(median(t["ttft_ms"] for t in turns), 3),

@@ -1,9 +1,17 @@
 """Corruption regressions operate on the committed native GPU measurements."""
+
 import json
 
 import pytest
 
-from backend.app.replay.recordings import DIRECTORY, checked_json, layers, load, path, validate
+from backend.app.replay.recordings import (
+    DIRECTORY,
+    checked_json,
+    layers,
+    load,
+    path,
+    validate,
+)
 
 
 def test_complete_file_checksum_covers_generated_text():
@@ -32,6 +40,56 @@ def test_recording_rejects_source_revision_and_changed_quote_for_same_buy_decisi
     load("rate-limit", True, source_chain=chain, request_quote=record["quote"])
     with pytest.raises(ValueError, match="context chain"):
         load("rate-limit", True, source_chain=chain[::-1])
-    altered = dict(record["quote"], compute_micros=record["quote"]["compute_micros"] + 1)
+    altered = dict(
+        record["quote"], compute_micros=record["quote"]["compute_micros"] + 1
+    )
     with pytest.raises(ValueError, match="quote differs"):
         load("rate-limit", True, source_chain=chain, request_quote=altered)
+
+
+def test_recorded_terminal_and_public_reference_expose_only_the_selected_application_evidence():
+    from backend.app.api.agent import archived_reference_turn
+    from backend.app.replay.recordings import application_evidence
+
+    for task in ("rate-limit", "route-class"):
+        for buy in (True, False):
+            decision = "buy" if buy else "compute"
+            track = load(task, buy)
+            reference = archived_reference_turn(task, decision)
+            assert reference["decision"] == decision and reference["final_turn"] == len(
+                track["turns"]
+            )
+            assert reference["application_check"] == track["application_check"]
+            assert (
+                reference["verified_application_turn"]
+                == track["verified_application_turn"]
+            )
+            assert application_evidence(track)["application_check"]["status"] in {
+                "passed",
+                "failed",
+            }
+    live = application_evidence()
+    assert (
+        live["application_check"]["status"] == "unverified"
+        and live["verified_application_turn"] is None
+    )
+
+
+def test_compiler_and_previous_sandbox_feedback_are_in_subsequent_prompt():
+    from backend.app.agents.tasks import STEPS, TASKS, turn_question
+
+    task = TASKS["rate-limit"][1]
+    # Python parser test vector, not a claimed execution of a generated app.
+    malformed = "```python\nif:\n    pass\n```"
+    prompt = turn_question(task, 6, STEPS[6], previous=malformed)
+    assert "SyntaxError at line 1" in prompt
+    track = load("route-class", True)
+    proposal = track["turns"][8]
+    next_prompt = turn_question(
+        TASKS["route-class"][1],
+        9,
+        STEPS[9],
+        previous=proposal["text"],
+        http_feedback=proposal["http_feedback"],
+    )
+    assert proposal["http_feedback"] in next_prompt
