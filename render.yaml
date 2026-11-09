@@ -52,6 +52,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: PUBLIC_WEB_URL
+        fromService:
+          type: web
+          name: cachet-api
+          envVarKey: PUBLIC_WEB_URL
       - key: CACHET_API_URL
         fromService:
           type: web
