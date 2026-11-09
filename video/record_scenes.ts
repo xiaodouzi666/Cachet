@@ -453,6 +453,7 @@ const scenes = {
   async S8({ page, baseURL, mark }) {
     const graphic = process.env.CACHET_ARCHITECTURE_URL || "/architecture.svg";
     const url = new URL(graphic, baseURL);
+    url.searchParams.set("rec", "1");
     if (url.origin !== new URL(baseURL).origin)
       throw Error(
         "The architecture graphic must be on the configured recording origin.",

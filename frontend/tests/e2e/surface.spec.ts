@@ -15,6 +15,8 @@ test("uses the real API through isolated browser workspaces and the settlement d
   await expect(page.getByLabel("Filter contexts")).toBeVisible();
   const listing = await (await page.request.get("/api/contexts")).json();
   const health = await (await page.request.get("/api/health")).json();
+  if (process.env.CACHET_EXPECT_MODE)
+    expect(health.mode).toBe(process.env.CACHET_EXPECT_MODE);
   if (listing.length) await expect(page.getByRole("grid")).toBeVisible();
   else await expect(page.getByText("No published contexts yet")).toBeVisible();
   const state = async () => (await page.request.get("/api/judge/state")).json();
