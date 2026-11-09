@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo"
@@ -29,7 +30,7 @@ start() {
     return
   fi
   tmux new-session -d -c "$repo" -s "$session" env "PATH=$PATH" bash -c \
-    'log=$1; shift; exec "$@" >> "$log" 2>&1' _ "logs/$session.log" "$@"
+    'umask 077; log=$1; shift; exec "$@" >> "$log" 2>&1' _ "logs/$session.log" "$@"
   started+=("$session")
 }
 

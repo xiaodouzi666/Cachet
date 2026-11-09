@@ -19,7 +19,13 @@ def engine_for(url: str):
     if parsed.get_backend_name() != "sqlite":
         raise ValueError("Cachet requires a SQLite database")
     if parsed.database not in (None, "", ":memory:"):
-        Path(parsed.database).parent.mkdir(parents=True, exist_ok=True)
+        database = Path(parsed.database)
+        database.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if str(parsed.query.get("uri", "")).lower() != "true":
+            # SQLite otherwise creates its ledger with the invoking user's ordinary umask.
+            # The sidecars inherit the database mode. Preserve explicitly provisioned files.
+            fd = os.open(database, os.O_CREAT | os.O_RDWR, 0o600)
+            os.close(fd)
     engine = create_engine(
         url, connect_args={"check_same_thread": False, "timeout": 30}
     )
