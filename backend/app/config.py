@@ -22,6 +22,9 @@ def sources():
 
 
 def calibration(mode="live"):
+    if mode == "replay":
+        # Archived model explanations and SLA receipts use the benchmark from their recording.
+        return json.loads(Path(__file__).with_name("replay").joinpath("calibration.json").read_text())
     if mode == "hosted":
         from .gateway.hosted import read_profile
         return read_profile()
