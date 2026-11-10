@@ -128,6 +128,12 @@ def next_delay(db, ws, run):
     return 1200
 
 
+def recording_targets_met(snapshot):
+    eligible = snapshot["publisher_available_micros"]
+    return (snapshot["threshold_captures"] >= 2 and snapshot["fault_turns"] == 6
+            and bool(snapshot["fault_refund_ids"]) and len(eligible) == 2 and min(eligible.values()) >= 250_000)
+
+
 def extend(db, ws, mid, window):
     marker = registered(db, ws, mid)
     snap = state(db, ws, mid)
@@ -139,8 +145,7 @@ def extend(db, ws, mid, window):
         raise HTTPException(409, "The current measurement window is still open")
     if snap["billable_micros"] >= 4_750_000:
         raise HTTPException(409, "The remaining budget is reserved for the recording")
-    if (snap["threshold_captures"] >= 2 and snap["fault_refund_ids"] and len(snap["publisher_available_micros"]) == 2
-        and min(snap["publisher_available_micros"].values()) >= 250_000):
+    if recording_targets_met(snap):
         raise HTTPException(409, "The recording targets are already satisfied")
     marker.data = {**marker.data, "extensions":window, "until":(utcnow() + timedelta(hours=3)).timestamp(),
                    "target_micros":4_750_000}
