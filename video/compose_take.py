@@ -11,6 +11,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 FPS = 25
+# Appendix B's scene timings, in seconds. Idle waits are cut; readable evidence frames fill the cut.
+SCENE_SECONDS = dict(
+    zip((f"S{i}" for i in range(1, 9)), (14, 18, 23, 25, 25, 20, 25, 20))
+)
 SCENES = tuple(f"S{i}" for i in range(1, 9))
 
 
@@ -69,6 +73,28 @@ def sources_for(scene):
     return ["regular", "soak"] if scene in ("S5", "S6") else ["regular"]
 
 
+def event_groups(manifest, scene):
+    groups = []
+    for kind in sources_for(scene):
+        source_scene = "S5" if kind == "decision" else scene
+        source_kind = "regular" if kind == "decision" else kind
+        record = manifest["segments"][f"{source_scene}-{source_kind}"]
+        if record["status"] != "captured" or not record["events"]:
+            raise ValueError(f"Incomplete source {scene}-{kind}")
+        prefix = source_scene if source_kind == "regular" else source_scene + "-soak"
+        chosen = record["events"]
+        if source_scene == "S5" and source_kind == "regular":
+            chosen = [
+                p
+                for p in chosen
+                if (p["label"] == "live-buy-decision") == (kind == "decision")
+            ]
+        if not chosen:
+            raise ValueError(f"Missing required visual evidence in {prefix}")
+        groups.append((kind, prefix, record, chosen))
+    return groups
+
+
 def compose(raw, dest, manifest, scene, tmp):
     chunks, marks, segments, files = [], [], {}, {}
     frames = 0
@@ -93,13 +119,12 @@ def compose(raw, dest, manifest, scene, tmp):
         "-r",
         str(FPS),
     ]
-    for kind in sources_for(scene):
-        source_scene = "S5" if kind == "decision" else scene
-        source_kind = "regular" if kind == "decision" else kind
-        record = manifest["segments"][f"{source_scene}-{source_kind}"]
-        if record["status"] != "captured" or not record["events"]:
-            raise ValueError(f"Incomplete source {scene}-{kind}")
-        prefix = source_scene if source_kind == "regular" else source_scene + "-soak"
+    groups = event_groups(manifest, scene)
+    count = sum(len(events) for _, _, _, events in groups)
+    per_event, extra = divmod(SCENE_SECONDS[scene] * FPS, count)
+    if per_event < 5:
+        raise ValueError("Too many events for this scene's editing duration")
+    for kind, prefix, record, chosen in groups:
         source_dir = (raw / record.get("sourceDir", ".")).resolve()
         if not source_dir.is_relative_to(raw):
             raise ValueError("Evidence directory escapes the sealed take")
@@ -114,15 +139,6 @@ def compose(raw, dest, manifest, scene, tmp):
         }
         last_ms = -1
         previous_frame = 0
-        chosen = record["events"]
-        if source_scene == "S5" and source_kind == "regular":
-            chosen = [
-                p
-                for p in chosen
-                if (p["label"] == "live-buy-decision") == (kind == "decision")
-            ]
-        if not chosen:
-            raise ValueError(f"Missing required visual evidence in {prefix}")
         for point in chosen:
             label = point["label"]
             if (
@@ -169,10 +185,14 @@ def compose(raw, dest, manifest, scene, tmp):
             )
             still = normalized
             files[name] = still
-            start = max(previous_frame, end - (24 if previous_frame else 0))
-            motion = end - start
+            allotment = per_event + (len(marks) < extra)
             popup = label == "sandbox-wallet-open"
-            if motion > 0 and not popup:
+            maximum_motion = (
+                min(36, allotment // 2) if previous_frame and not popup else 0
+            )
+            start = max(previous_frame, end - maximum_motion)
+            motion = end - start
+            if motion:
                 out = tmp / f"{len(chunks):03d}.webm"
                 encode(
                     [
@@ -191,7 +211,7 @@ def compose(raw, dest, manifest, scene, tmp):
                 chunks.append(out)
                 frames += motion
             previous_frame = end
-            hold = 65 if popup else 45
+            hold = allotment - motion
             p = tmp / f"{len(chunks):03d}.webm"
             encode(
                 [
@@ -212,9 +232,12 @@ def compose(raw, dest, manifest, scene, tmp):
             chunks.append(p)
             mark = {
                 "label": canonical,
-                "ms": round((frames + hold // 2) * 1000 / FPS),
+                # First stable frame of this recorded event after the preceding motion.
+                "ms": round((frames + 1) * 1000 / FPS),
                 "source": kind,
                 "raw_ms": last_ms,
+                "motion_ms": round(motion * 1000 / FPS),
+                "hold_ms": round(hold * 1000 / FPS),
                 "screenshot_sha256": sha(still),
                 "source_screenshot_sha256": source_still,
             }

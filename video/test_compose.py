@@ -25,7 +25,7 @@ class EditedMilestones(unittest.TestCase):
                     "-f",
                     "lavfi",
                     "-i",
-                    "color=c=navy:s=1920x1080:r=25:d=12",
+                    "color=c=navy:s=1920x1080:r=25:d=30",
                     "-an",
                     "-threads",
                     "2",
@@ -75,7 +75,7 @@ class EditedMilestones(unittest.TestCase):
                     "S4-regular": segment(
                         [
                             {"label": "sandbox-wallet-open", "ms": 1200},
-                            {"label": "sandbox-authorized", "ms": 10800},
+                            {"label": "sandbox-authorized", "ms": 27800},
                         ]
                     ),
                     "S5-regular": segment(
@@ -111,7 +111,12 @@ class EditedMilestones(unittest.TestCase):
             )
             out = json.loads((dest / "timeline.json").read_bytes())
             s4 = out["scenes"]["S4"]
-            self.assertLess(s4["duration_ms"], 9000)
+            self.assertLessEqual(abs(s4["duration_ms"] - 25000), 100)
+            raw_gap = s4["events"][1]["raw_ms"] - s4["events"][0]["raw_ms"]
+            cut_gap = s4["events"][1]["ms"] - s4["events"][0]["ms"]
+            self.assertGreater(raw_gap, 25000)
+            self.assertLess(cut_gap, 11000)
+            self.assertLessEqual(s4["events"][1]["motion_ms"], 1440)
             self.assertEqual(
                 [p["label"] for p in s4["events"]],
                 ["sandbox-wallet-open", "sandbox-authorized", "live-buy-decision"],
