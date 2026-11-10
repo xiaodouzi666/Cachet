@@ -419,8 +419,8 @@ const scenes = {
     const {run_id:coldRun}=await started.json();
     const [cold]=await readRunTurns(page,coldRun,flushId);
     expect(isColdAndFree(cold,flushId)).toBe(true);
-    const coldRow=page.getByTestId("metered-turn").filter({has:page.getByText("Cold · free public prefix",{exact:true})});
-    await expect(coldRow).toHaveAttribute("data-call-id",cold.id);
+    expect(cold.id).toMatch(/^[a-zA-Z0-9_-]+$/);
+    const coldRow=page.locator('[data-testid="metered-turn"][data-call-id="'+cold.id+'"]');
     await expect(coldRow).toContainText("Cold · free public prefix");
     await coldRow.scrollIntoViewIfNeeded();
     await mark("cold-free-public-prefix");
