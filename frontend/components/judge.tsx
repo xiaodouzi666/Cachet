@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { ArrowRight, Check, ChevronRight, RefreshCw } from "lucide-react";
 import { api, describe, latency, usd, useResource } from "../lib/client";
 import type { Mandate, Quote, Run } from "../lib/types";
@@ -331,6 +332,13 @@ export function Judge() {
           <p role="status" className="help">
             {notice || busy + "…"}
           </p>
+        )}
+        {step === 0 && session.mode === "replay" && (
+          <section className="panel">
+            <h3>Explore the recorded GPU runs</h3>
+            <p>The live GPU is offline. Inspect ten measured turns from each built-in task while the warm-cache walkthrough waits for live inference.</p>
+            <Link className="text-button" href="/dev/ui">Inspect recorded runs <ArrowRight size={15} /></Link>
+          </section>
         )}
         {step === 0 && (
           <section className="panel">
