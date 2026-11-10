@@ -7,11 +7,13 @@ import re
 from datetime import datetime
 
 from backend.app.agents.tasks import STEPS, TASKS, app_code, turn_question
+from backend.app.agents.window import RECENT_TURNS, WINDOW_TOKENS, window_prompt
 from backend.app.config import ROOT, manifest, sources
 from backend.app.gateway.prompt_builder import END, SYSTEM, Prefix, dialogue, token_hash
 
 DIRECTORY = ROOT / "backend/app/replay/traces"
-SCHEMA = 7
+SCHEMA = 8
+SUPPORTED_SCHEMAS = (6, 7, SCHEMA)
 SCHEMA_6_FIRST_STEP = (
     "In two sentences, explain the chosen strategy using the two quoted costs in microdollars."
 )
@@ -72,7 +74,7 @@ def layers(task_id):
 
 def recorded_question(schema, task, step, *, quote=None, previous="", http_feedback=None):
     require(
-        type(schema) is int and schema in (6, SCHEMA),
+        type(schema) is int and schema in SUPPORTED_SCHEMAS,
         "Unsupported GPU recording format",
     )
     legacy_first_turn = schema == 6 and step == 0
@@ -97,6 +99,8 @@ def signature(task_id, buy, *, schema=SCHEMA):
         layers(task_id),
         manifest()["tokenizer"],
     ]
+    if schema >= 8:
+        spec.append({"private_recent_turns": RECENT_TURNS, "max_window_tokens": WINDOW_TOKENS})
     return digest(json.dumps(spec, ensure_ascii=False, sort_keys=True).encode())
 
 
@@ -113,7 +117,7 @@ def validate(record, task_id, buy, *, source_chain=None, request_quote=None):
     require(
         type(record) is dict
         and type(record.get("schema")) is int
-        and record["schema"] in (6, SCHEMA)
+        and record["schema"] in SUPPORTED_SCHEMAS
         and integer(record.get("output_limit"), 1),
         "Unsupported GPU recording format or output limit",
     )
@@ -183,14 +187,14 @@ def validate(record, task_id, buy, *, source_chain=None, request_quote=None):
             and turn["turn"] == i
             and isinstance(turn.get("text"), str)
             and turn["text"].strip()
-            and integer(turn.get("prompt_tokens"), previous_prompt + 1)
+            and integer(turn.get("prompt_tokens"), 1 if record["schema"] >= 8 else previous_prompt + 1)
             and integer(turn.get("cached_tokens"))
             and turn["cached_tokens"] <= turn["prompt_tokens"]
             and turn.get("finish_reason") == "stop"
             and integer(turn.get("output_tokens"), 1)
             and turn["output_tokens"] <= record["output_limit"]
             and turn["prompt_tokens"] + record["output_limit"]
-            <= manifest()["context_window"]
+            <= (min(WINDOW_TOKENS, manifest()["context_window"]) if record["schema"] >= 8 else manifest()["context_window"])
             and all(
                 finite(turn.get(k)) and turn[k] > 0
                 for k in ("engine_ttft_ms", "ttft_ms", "total_ms")
@@ -311,7 +315,10 @@ def verify_inputs(engine, record):
             http_feedback=record["turns"][i - 1].get("http_feedback") if i else None,
         )
         messages.append(("user", question))
-        prompt = prefix.build(engine, owners, record["tenant"], messages, buy)
+        if record["schema"] >= 8:
+            prompt = window_prompt(engine, prefix, owners, record["tenant"], messages, buy, record["output_limit"])
+        else:
+            prompt = prefix.build(engine, owners, record["tenant"], messages, buy)
         require(
             turn["spans"] == prompt.spans
             and turn["prompt_tokens"] == len(prompt.ids)

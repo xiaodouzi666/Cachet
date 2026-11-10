@@ -13,6 +13,7 @@ from backend.app.config import value
 from backend.app.db import session_scope
 from backend.app.models import (
     AgentRun,
+    Call,
     Capture,
     Consumer,
     Mandate,
@@ -20,7 +21,7 @@ from backend.app.models import (
     Workspace,
     utcnow,
 )
-from backend.app.operations import Control, Operation
+from backend.app.operations import Control, Operation, RunEvent
 from backend.app.money import usd_to_micros
 from backend.app.paypal.client import PayPalClient, capture_flag_matches, request_id
 from backend.app.settlement.capture_policy import plan_capture
@@ -250,6 +251,19 @@ def ensure_payer_link(ws, identifier):
         remember_authorized_payer(db, owned(db, Mandate, identifier, ws), order)
 
 
+def emit_receipt(db, row, kind, payload):
+    # A single PayPal receipt may cover calls from several runs on one mandate.
+    by_run = {}
+    for run_id, call_id in db.execute(
+        select(Call.run_id, Call.id).where(
+            Call.workspace_id == row.workspace_id, Call.id.in_(row.call_ids_json)
+        ).order_by(Call.run_id, Call.turn)
+    ):
+        by_run.setdefault(run_id, []).append(call_id)
+    for run_id, call_ids in by_run.items():
+        db.add(RunEvent(run_id=run_id, event_type=kind, payload={**payload, "call_ids": call_ids}))
+
+
 def capture(ws, identifier, *, final=False, force=False):
     with lock(ws), PayPalClient.from_env() as pp:
         with session_scope() as db:
@@ -321,7 +335,8 @@ def capture(ws, identifier, *, final=False, force=False):
             row = db.scalar(
                 select(Capture).where(Capture.paypal_capture_id == remote_id)
             )
-            if row is None:
+            is_new = row is None
+            if is_new:
                 row = Capture(
                     workspace_id=ws,
                     mandate_id=m.id,
@@ -335,12 +350,15 @@ def capture(ws, identifier, *, final=False, force=False):
             if m.status == "CAPTURING":
                 transition(m, "ACTIVE")
             db.get(Operation, op.id).result = {"id": remote_id}
-            return {
+            result = {
                 "id": row.id,
                 "paypal_capture_id": remote_id,
                 "amount_cents": amount,
                 "fee_cents": fee,
             }
+            if is_new:
+                emit_receipt(db, row, "capture", result)
+            return result
 
 
 def close(ws, identifier):
@@ -460,7 +478,8 @@ def refund_calls(ws, capture_id, call_ids, reason):
                 or sorted(row.call_ids_json) != sorted(call_ids)
             ):
                 raise ValueError("Confirmed refund belongs to a different operation")
-            if row is None:
+            is_new = row is None
+            if is_new:
                 row = Refund(
                     workspace_id=ws,
                     capture_id=cap.id,
@@ -477,5 +496,7 @@ def refund_calls(ws, capture_id, call_ids, reason):
                 "paypal_refund_id": remote_id,
                 "amount_cents": amount,
             }
+            if is_new:
+                emit_receipt(db, row, "refund", {**result, "capture_id": cap.id})
             db.get(Operation, op.id).result = result
             return result
