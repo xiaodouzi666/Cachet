@@ -63,10 +63,16 @@ const sources = [
     name: "Payout batches",
     fields: ["paypal_batch_id", "amount_cents", "fee_cents", "net_cents", "status"],
   },
+  {
+    id: "events",
+    name: "PayPal events",
+    fields: ["event_type", "resource_id", "verified", "received_at"],
+  },
 ] as const;
 type SourceId = (typeof sources)[number]["id"];
 export type Tables = Record<SourceId, FinancialRow[]>;
 function fieldLabel(source: SourceId, key: string) {
+  if (key === "verified") return "Signature";
   if (key === "amount_cents") return "Amount (USD)";
   if (key === "fee_cents") return source === "refunds" ? "Fee returned (USD)" : "PayPal fee (USD)";
   if (key === "net_cents") return source === "captures" ? "Net received (USD)" : "Net debited (USD)";
@@ -75,14 +81,15 @@ function fieldLabel(source: SourceId, key: string) {
 
 function fieldValue(record: FinancialRow, key: string) {
   const value = record[key];
+  if (key === "verified") return value === true ? "Verified" : "Unverified";
   if (key.endsWith("_cents")) return typeof value === "number" ? value / 100 : null;
   return value ?? null;
 }
 
 type Proposal = { proposal_id: string; description: string };
-const Royalties = createContext<Royalty[]>([]);
+const Royalties = createContext<{ rows: Royalty[]; systemHits: number | null }>({ rows: [], systemHits: null });
 function RoyaltyTree() {
-  const rows = useContext(Royalties),
+  const { rows, systemHits } = useContext(Royalties),
     [basis, setBasis] = useState<"linear" | "shapley">("shapley");
   function branch(row: Royalty, ancestors: Set<string>): React.ReactNode {
     if (ancestors.has(row.id)) return null;
@@ -126,17 +133,23 @@ function RoyaltyTree() {
           </button>
         ))}
       </div>
-      {rows.length ? (
-        <ul>
-          {rows
-            .filter(
-              (r) => !r.parent_id || !rows.some((p) => p.id === r.parent_id),
-            )
-            .map((r) => branch(r, new Set()))}
-        </ul>
-      ) : (
-        <Empty title="No attributed hits in this workspace" />
-      )}
+      <p className="royalty-basis">Publisher payables use Shapley attribution. Select Linear to compare allocations.</p>
+      <ul>
+        <li>
+          <div>
+            <GitBranch size={15} />
+            <span>P0 · System<small className="royalty-scope">Platform-owned prefix</small></span>
+            <small>{count(systemHits)} workspace hits</small>
+          </div>
+          {rows.length > 0 && (
+            <ul>
+              {rows.filter((r) => !r.parent_id || !rows.some((p) => p.id === r.parent_id))
+                .map((r) => branch(r, new Set()))}
+            </ul>
+          )}
+        </li>
+      </ul>
+      {!rows.length && <Empty title="No publisher layers in this workspace" />}
     </div>
   );
 }
@@ -194,10 +207,12 @@ const theme = studioTheme.withParams({
 export default function SettlementStudio({
   tables,
   royalties,
+  systemHits,
   afterConfirm,
 }: {
   tables: Tables;
   royalties: Royalty[];
+  systemHits: number | null;
   afterConfirm: () => void;
 }) {
   const studioRef = useRef<AgStudioApi<Registry> | null>(null);
@@ -350,7 +365,7 @@ export default function SettlementStudio({
             </button>
           ))}
         </nav>
-        <Royalties.Provider value={royalties}>
+        <Royalties.Provider value={{ rows: royalties, systemHits }}>
           <AgStudioProvider
             modules={modules}
             licenseKey={

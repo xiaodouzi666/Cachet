@@ -14,23 +14,26 @@ export function Settlement() {
     captures = useResource<FinancialRow[]>("captures", 12000),
     refunds = useResource<FinancialRow[]>("refunds", 12000),
     payouts = useResource<FinancialRow[]>("payouts", 12000),
+    events = useResource<FinancialRow[]>("paypal-events", 12000),
+    system = useResource<{ hit_tokens: number }>("royalties/system", 12000),
     royalties = useResource<Royalty[]>("royalties", 12000),
     recon = useResource<Reconcile>("reconcile");
-  const resources = [ledger, captures, refunds, payouts, royalties];
+  const resources = [ledger, captures, refunds, payouts, events, royalties, system];
   const tables = useMemo(
     () => ({
       ledger: ledger.data || [],
       captures: captures.data || [],
       refunds: refunds.data || [],
       payouts: payouts.data || [],
+      events: events.data || [],
     }),
-    [ledger.data, captures.data, refunds.data, payouts.data],
+    [ledger.data, captures.data, refunds.data, payouts.data, events.data],
   );
   const refresh = useCallback(() => {
-    [ledger, captures, refunds, payouts, royalties, recon].forEach(
+    [ledger, captures, refunds, payouts, events, royalties, system, recon].forEach(
       (r) => void r.reload(),
     );
-  }, [ledger, captures, refunds, payouts, royalties, recon]);
+  }, [ledger, captures, refunds, payouts, events, royalties, system, recon]);
   const err = resources.find((r) => r.error)?.error || "";
   return (
     <div className="stack">
@@ -78,6 +81,7 @@ export function Settlement() {
           <Studio
             tables={tables}
             royalties={royalties.data || []}
+            systemHits={system.data?.hit_tokens ?? null}
             afterConfirm={refresh}
           />
         )
