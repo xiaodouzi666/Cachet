@@ -13,6 +13,7 @@ from ..models import (
     AgentRun,
     Call,
     Capture,
+    CaptureAllocation,
     Context,
     RoyaltyUsage,
     LedgerEntry,
@@ -73,16 +74,18 @@ def earnings(db, ws, days=7):
         p.id: p
         for p in db.scalars(select(Publisher).where(Publisher.workspace_id == ws))
     }
+    owned_publishers = set(pubs)
+    for ctx in marketplace.settlement_contexts(db, ws):
+        if ctx.publisher_id not in pubs:
+            pubs[ctx.publisher_id] = db.get(Publisher, ctx.publisher_id)
     if not pubs:
-        return [
-            "There are no publishers in this workspace, so it has no publisher earnings to compare."
-        ]
+        return ["There are no publishers with earnings or purchases in this workspace."]
     stats = {pid: dict(hits=0, gross=0, linear=0, call=None) for pid in pubs}
     rows = db.execute(
         select(RoyaltyUsage, Context.publisher_id, Call.workspace_id)
         .join(Context, Context.id == RoyaltyUsage.context_id)
         .join(Call, Call.id == RoyaltyUsage.call_id)
-        .where(Context.workspace_id == ws, RoyaltyUsage.measured_at >= since)
+        .where((Context.workspace_id == ws) | (Call.workspace_id == ws), RoyaltyUsage.measured_at >= since)
         .order_by(RoyaltyUsage.measured_at)
     )
     for usage, pid, buyer in rows:
@@ -95,6 +98,16 @@ def earnings(db, ws, days=7):
     lines = []
     for pid, p in pubs.items():
         s = stats[pid]
+        if pid not in owned_publishers:
+            text = (f"{p.name} (publisher {pid}) accrued {usd(s['gross'])} gross from "
+                    f"{s['hits']:,} measured hits in this workspace's purchases over the last {days} days.")
+            if s["call"]:
+                text += f" Last contributing call: {s['call']}."
+            lines.append(text)
+            if s["hits"]:
+                lines.append(f"{p.name} received {Decimal(s['gross']) / s['hits']:.6f} microdollars per hit "
+                             f"before reversals, compared with {usd(s['linear'])} using a linear split.")
+            continue
         net = db.scalar(
             select(
                 func.coalesce(
@@ -149,7 +162,13 @@ def mandate_breakdown(db, ws, mandate_id):
         lines.append(
             f"Sandbox order {m.paypal_order_id} issued authorization {m.authorization_id}."
         )
-    if m.status in ("CLOSED", "VOIDED", "EXPIRED"):
+    forgiven = db.scalar(select(func.coalesce(func.sum(LedgerEntry.debit_micros), 0)).where(
+        LedgerEntry.workspace_id == ws, LedgerEntry.ref_id == m.id,
+        LedgerEntry.ref_type == "writeoff", LedgerEntry.account == "platform:writeoff"))
+    if forgiven:
+        lines.append(f"Cachet forgave {usd(forgiven)} at close. The platform absorbed this receivable "
+                     "and the verified publisher royalties remain payable.")
+    if m.authorization_id and m.status in ("CLOSED", "VOIDED", "EXPIRED"):
         lines.append(
             f"The remaining authorization was {usd(m.cap_micros - m.captured_micros)} at close."
         )
@@ -174,12 +193,12 @@ def mandate_breakdown(db, ws, mandate_id):
     for cap in caps:
         lines.append(
             f"Capture {cap.paypal_capture_id or cap.id} is {cap.status}: {usd(cap.amount_cents * 10000)} with "
-            f"{usd(cap.fee_cents * 10000)} in recorded PayPal fees."
+            f"{usd(cap.fee_cents * 10000)} in recorded PayPal fees and {usd((cap.amount_cents - cap.fee_cents) * 10000)} net."
         )
         for r in db.scalars(select(Refund).where(Refund.capture_id == cap.id)):
             lines.append(
                 f"Refund {r.paypal_refund_id or r.id} for capture {cap.paypal_capture_id} is {r.status}: "
-                f"{usd(r.amount_cents * 10000)} for {r.reason}."
+                f"{usd(r.amount_cents * 10000)} for {r.reason}, with {usd(r.fee_reversal_cents * 10000)} in returned fees."
             )
     return lines
 
@@ -196,9 +215,12 @@ def call_details(db, ws, call_id):
     ]
     for pid, n in c.royalty_json.items():
         p = scoped(db, Publisher, ws, pid)
-        if p:
+        # This call belongs to the authenticated buyer. The canonical published name
+        # is public catalog data. Do not expose another tenant's receiver or order.
+        publisher = p or db.get(Publisher, pid)
+        if publisher:
             lines.append(
-                f"{p.name} ({pid}) was allocated {usd(n)}; a linear split gives "
+                f"{publisher.name} ({pid}) was allocated {usd(n)}; a linear split gives "
                 f"{usd(c.linear_royalty_json.get(pid, 0))}."
             )
     for span in c.spans_json:
@@ -351,12 +373,21 @@ def propose(ws, call_id):
         m = db.get(AgentRun, c.run_id).mandate_id
         if not c.charge_micros:
             return [f"Call {c.id} was free. It has no charge to refund."], None
+        captured = list(db.scalars(select(Capture).join(
+            CaptureAllocation, CaptureAllocation.capture_id == Capture.id
+        ).where(CaptureAllocation.call_id == c.id, Capture.workspace_id == ws)))
+        refundable = sum(ledger.plan_refund(db, cap, [c.id], reason="dispute").amount_cents
+                         for cap in captured)
+        receipts = ", ".join(cap.paypal_capture_id for cap in captured if cap.paypal_capture_id)
         identifier = uuid4().hex
         description = (
             f"Review the dispute for call {c.id} on mandate {m}. The original charge was "
             f"{usd(c.charge_micros)}. Confirmation reverses eligible pending charges and requests "
             "eligible captured refunds in the PayPal sandbox. Prior refunds and cent rounding apply."
         )
+        description += f" The current PayPal refund estimate is {usd(refundable * 10000)}."
+        if receipts:
+            description += f" Capture IDs: {receipts}."
         data = dict(
             proposal_id=identifier,
             call_id=c.id,
