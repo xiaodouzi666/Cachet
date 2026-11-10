@@ -96,54 +96,64 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
     await catalogPage.goto("/catalog");
     await expect(catalogPage.getByLabel("Filter contexts")).toBeVisible();
     const current = await read(raw, "contexts");
-    if (
-      !["starlette", "fastapi"].every((slug) =>
-        current.some((c: any) => c.slug === slug && c.status === "hot"),
-      )
-    ) {
-      await raw.goto("/publish");
-      for (const slug of ["starlette", "fastapi"]) {
-        const address =
-          process.env["PUBLISHER_" + slug.toUpperCase() + "_EMAIL"];
-        if (!address) throw new Error("Set both sandbox publisher recipients.");
-        await raw.getByLabel("Licensed source").selectOption(slug);
-        await raw.getByLabel("Publisher name").fill(slug + " maintainer");
-        await raw.getByLabel("PayPal receiver email").fill(address);
-        if (slug === "fastapi")
-          await expect(raw.getByLabel("Parent context")).not.toHaveValue("");
-        await raw.getByRole("button", { name: "Publish and warm" }).click();
-        await expect
-          .poll(
-            async () =>
-              (await read(raw, "contexts")).find((c: any) => c.slug === slug)
-                ?.status,
-            { timeout: 90000 },
-          )
-          .toBe("hot");
+    const publisherTag = "sandbox maintainer " + person.workspace_id.slice(0, 8);
+    const managed = new Map<string, any>(
+      current.filter((row: any) => row.can_manage).map((row: any) => [row.slug, row]),
+    );
+    const publishedIds: string[] = [];
+    await raw.goto("/publish");
+    for (const slug of ["starlette", "fastapi"]) {
+      if (managed.get(slug)?.status === "hot") continue;
+      const address = process.env["PUBLISHER_" + slug.toUpperCase() + "_EMAIL"];
+      if (!address) throw new Error("Set both sandbox publisher recipients.");
+      await raw.getByLabel("Licensed source").selectOption(slug);
+      await raw.getByLabel("Publisher name").fill(slug + " " + publisherTag);
+      await raw.getByLabel("PayPal receiver email").fill(address);
+      if (slug === "fastapi") {
+        const parent = managed.get("starlette");
+        expect(parent?.id).toBeTruthy();
+        await raw.getByLabel("Parent context").selectOption(parent.id);
       }
+      const result = raw.waitForResponse((response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/contexts",
+      );
+      await raw.getByRole("button", { name: "Publish and warm" }).click();
+      const saved = await result;
+      expect(saved.ok()).toBe(true);
+      const published = await saved.json();
+      expect(published.can_manage).toBe(true);
+      expect(published.slug).toBe(slug);
+      if (slug === "fastapi") expect(published.parent_id).toBe(managed.get("starlette").id);
+      await expect.poll(async () => {
+        const reading = await read(raw, "contexts/" + published.id);
+        managed.set(slug, reading);
+        return reading.status === "hot" && reading.last_probe_hit_ratio >= 0.95;
+      }, { timeout: 90000 }).toBe(true);
+      publishedIds.push(published.id);
     }
     await catalogPage.bringToFront();
     const catalog = await read(raw, "contexts");
     for (const slug of ["starlette", "fastapi"]) {
-      await expect(
-        catalogPage.getByRole("grid").getByText(slug, { exact: false }).first(),
-      ).toBeVisible({ timeout: 30000 });
-      expect(
-        catalog.find(
-          (row: any) =>
-            row.slug === slug &&
-            row.status === "hot" &&
-            row.last_probe_hit_ratio >= 0.95,
-        ),
-      ).toBeTruthy();
+      const ours = managed.get(slug);
+      expect(ours?.can_manage).toBe(true);
+      expect(ours.last_probe_hit_ratio).toBeGreaterThanOrEqual(0.95);
+      await catalogPage.getByLabel("Filter contexts").fill(ours.publisher_name);
+      await expect(catalogPage.getByRole("grid").locator(
+        'a[href="/agent?context=' + encodeURIComponent(ours.id) + '"]',
+      )).toBeVisible({ timeout: 30000 });
     }
     const catalogProof = {
       before_count: current.length,
       after_count: catalog.length,
+      before_owned: current.filter((row: any) => row.can_manage).map((row: any) => row.id),
+      published_ids: publishedIds,
       browser_refresh_clicked: false,
-      layers: catalog
+      layers: [...managed.values()]
         .filter((c: any) => ["starlette", "fastapi"].includes(c.slug))
         .map((c: any) => ({
+          id: c.id,
+          parent_id: c.parent_id,
           slug: c.slug,
           status: c.status,
           last_probe_at: c.last_probe_at,
@@ -188,9 +198,7 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
     const before = await read(raw, "judge/state");
     expect(before.mandate.id).toBe(active);
     expect(before.run).toBeNull();
-    const selected = catalog.find(
-      (c: any) => c.slug === "starlette" && c.status === "hot",
-    );
+    const selected = managed.get("starlette");
     await page.getByLabel("Context", { exact: true }).selectOption(selected.id);
     await page.getByLabel("Coding task").selectOption("route-class");
     await page.getByRole("button", { name: "Get quote" }).click();
