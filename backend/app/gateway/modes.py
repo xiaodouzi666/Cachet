@@ -2,6 +2,7 @@ import threading
 import time
 import httpx
 from backend.app.config import value
+from backend.app.gateway import registration
 from backend.app.gateway.hosted import checked_profile, fingerprint
 from backend.app.gateway.sglang_client import Engine, settings
 from backend.app.replay.recordings import available
@@ -16,8 +17,14 @@ def health():
     with _lock:
         if _state is not None and time.monotonic() - _checked < 5:
             return dict(_state)
-        url, key = settings()
         try:
+            if registration.enabled():
+                state = registration.active()
+                if not state:
+                    raise ValueError
+                return {"mode": "live", "gpu": state["gpu"], "model": state["model"],
+                        "sglang": "online", "sglang_version": state["sglang_version"]}
+            url, key = settings()
             if not key:
                 raise ValueError
             response = httpx.get(

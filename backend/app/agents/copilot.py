@@ -56,6 +56,7 @@ class ModelFailure(RuntimeError):
 
 
 def chat(messages, max_tokens):
+    transport = None
     external = value("COPILOT_LLM_BASE_URL")
     if external:
         base = external.rstrip("/")
@@ -63,13 +64,25 @@ def chat(messages, max_tokens):
         if not model:
             raise ModelFailure("Configure the hosted Copilot model name.")
     else:
-        base = value("SGLANG_BASE_URL", "http://127.0.0.1:30000").rstrip("/") + "/v1"
-        key, model = value("SGLANG_API_KEY"), value("MODEL_ID", "Qwen/Qwen2.5-7B-Instruct-AWQ")
+        from backend.app.gateway.sglang_client import settings as inference_connection
+        try:
+            origin, endpoint_key = inference_connection()
+        except ValueError as exc:
+            raise ModelFailure("The live GPU endpoint is unavailable.") from exc
+        from backend.app.gateway import registration
+        if registration.enabled():
+            transport = registration.TunnelTransport(origin)
+        base = origin.rstrip("/") + "/v1"
+        key, model = endpoint_key, value("MODEL_ID", "Qwen/Qwen2.5-7B-Instruct-AWQ")
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     body = {"model": model, "messages": messages, "temperature": 0, "max_tokens": max_tokens}
     try:
-        response = httpx.post(base + "/chat/completions", headers=headers, json=body,
-                              timeout=httpx.Timeout(90, connect=8))
+        if transport is None:
+            response = httpx.post(base + "/chat/completions", headers=headers, json=body,
+                                  timeout=httpx.Timeout(90, connect=8))
+        else:
+            with httpx.Client(transport=transport, timeout=httpx.Timeout(90, connect=8)) as client:
+                response = client.post(base + "/chat/completions", headers=headers, json=body)
         if response.status_code >= 400:
             raise ModelFailure(f"The Copilot model returned HTTP {response.status_code}.")
         content = response.json()["choices"][0]["message"]["content"]
