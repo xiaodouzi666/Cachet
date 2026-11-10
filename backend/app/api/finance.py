@@ -9,7 +9,7 @@ from fastapi import (
     Response,
 )
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from backend.app import marketplace
 from backend.app.api.access import (
     gateway,
@@ -35,6 +35,7 @@ from backend.app.models import (
     PayoutItem,
     Refund,
     Workspace,
+    WebhookEvent,
 )
 from backend.app.operations import Control, RunEvent
 from backend.app.money import usd_to_micros
@@ -430,6 +431,40 @@ def royalties(ws=wsdep):
                 }
             )
         return result
+
+
+@router.get("/paypal-events")
+def paypal_events(ws=wsdep):
+    """Show receipts associated with this workspace's provider IDs, without raw payloads."""
+    subscriptions = (
+        (("CHECKOUT.ORDER.APPROVED",), Mandate.paypal_order_id),
+        (("PAYMENT.AUTHORIZATION.CREATED", "PAYMENT.AUTHORIZATION.VOIDED"), Mandate.authorization_id),
+        (("PAYMENT.CAPTURE.COMPLETED",), Capture.paypal_capture_id),
+        (("PAYMENT.CAPTURE.REFUNDED",), Refund.paypal_refund_id),
+        (("PAYMENT.PAYOUTSBATCH.SUCCESS",), PayoutBatch.paypal_batch_id),
+        (("PAYMENT.PAYOUTS-ITEM.SUCCEEDED",), PayoutItem.paypal_item_id),
+    )
+    owned_receipts = [
+        and_(WebhookEvent.event_type.in_(types),
+             WebhookEvent.resource_id.in_(select(column).where(column.class_.workspace_id == ws)))
+        for types, column in subscriptions
+    ]
+    with session_scope(write=False) as db:
+        return db.execute(select(
+            WebhookEvent.event_type, WebhookEvent.resource_id,
+            WebhookEvent.verified, WebhookEvent.received_at,
+        ).where(WebhookEvent.verified.is_(True), or_(*owned_receipts)).order_by(
+            WebhookEvent.received_at.desc(), WebhookEvent.id.desc(),
+        ).limit(200)).mappings().all()
+
+
+@router.get("/royalties/system")
+def system_prefix(ws=wsdep):
+    """P0 has no publisher. Its measured hits are scoped to this buyer's own calls."""
+    with session_scope(write=False) as db:
+        hits = db.scalar(select(func.coalesce(func.sum(Call.hits_json["system"].as_integer()), 0))
+                         .where(Call.workspace_id == ws))
+    return {"title": "P0 · System", "hit_tokens": hits, "scope": "workspace_calls"}
 
 
 @router.get("/reconcile")
