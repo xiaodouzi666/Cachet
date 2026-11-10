@@ -69,6 +69,10 @@ def run(args):
         base_url=api_url, headers={"X-Admin-Token":admin}, timeout=httpx.Timeout(240, connect=8), follow_redirects=False,
     ) as api:
         check(journal.data.setdefault("origin", api_url) == api_url, "Resume the journal on its original backend.")
+        web_url = origin(args.web_origin or require(cfg, "PUBLIC_WEB_URL"))
+        if urlsplit(api_url).hostname not in ("127.0.0.1", "localhost", "::1"):
+            check(web_url == origin(require(cfg, "PUBLIC_WEB_URL")), "Use the configured production web origin for the filming workspace.")
+        check(journal.data.setdefault("web_origin", web_url) == web_url, "Resume the journal on its original web origin.")
         demo = Demo(journal, api, pp, cfg, "card")
         if journal.data.get("workspace_cookie"):
             api.cookies.set("cachet_workspace", journal.data["workspace_cookie"])
@@ -178,6 +182,7 @@ if __name__ == "__main__":
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", help="Configured production API or a loopback development API.")
+    parser.add_argument("--web-origin", help="Web origin of an isolated loopback recording deployment; defaults to PUBLIC_WEB_URL.")
     parser.add_argument("--state", type=Path, default=ROOT / "logs" / "soak-production.json")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--status", action="store_true", help="Print only the sanitized current registration and receipts.")
