@@ -21,3 +21,5 @@ To test a live deployment's physical tunnel loss and restoration, run this on it
 ```
 
 For local development, `INFERENCE_ENDPOINT_MODE=direct` connects to the configured `SGLANG_BASE_URL` on loopback. Local and recorded demos do not need a public tunnel.
+
+Before admitting production tasks, calibrate the deployed path during an exclusive GPU window. POST `/api/admin/inference-calibration` with the operator token, then read the same endpoint until it reports `completed`. This measures five verified cold/warm pairs at each of 2k, 4k, 8k, 16k and 26k tokens from the running API. Each cold pair flushes the shared cache. The full samples remain on the service's persistent disk. After calibration, rewarm the catalog. Public live quotes and SLA checks use these measured transport latencies. Royalty attribution continues to use the GPU's measured prefill cost. Replay keeps its recorded GPU-host measurements.

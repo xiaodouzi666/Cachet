@@ -62,7 +62,8 @@ def listed_sources():
 
 @router.get("/benchmarks")
 def benchmarks():
-    mode = "hosted" if health()["mode"] == "hosted" else "live"
+    serving = health()["mode"]
+    mode = serving if serving in {"live", "hosted"} else "replay"
     c = calibration(mode)
     return [
         dict(
@@ -74,6 +75,7 @@ def benchmarks():
             model=c["model"],
             sglang=c["sglang"],
             measured_at=c["measured_at"],
+            latency_source=c.get("latency_source", "GPU host benchmark"),
             trials=len(b["runs"]),
         )
         for b in c["bands"]

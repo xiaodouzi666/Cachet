@@ -25,7 +25,11 @@ def calibration(mode="live"):
     if mode == "hosted":
         from .gateway.hosted import read_profile
         return read_profile()
-    return json.loads((ROOT / "bench/results/calibration.json").read_text())
+    profile = json.loads((ROOT / "bench/results/calibration.json").read_text())
+    if mode == "live" and value("INFERENCE_ENDPOINT_MODE", "direct") == "registered":
+        from .gateway.route_calibration import apply, current
+        return apply(profile, current())
+    return profile
 
 
 def band_for(tokens, profile=None):
