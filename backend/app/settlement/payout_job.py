@@ -1,4 +1,8 @@
 from datetime import timedelta
+import hashlib
+import json
+
+from fastapi import HTTPException
 
 from sqlalchemy import select
 from backend.app import ledger
@@ -61,39 +65,39 @@ def refresh_batch(pp, ws, batch_id):
         }
 
 
-def settle(ws, batch_id=None):
+def allocation(db, ws, batch_id=None):
+    batch = owned(db, PayoutBatch, batch_id, ws) if batch_id else db.scalar(
+        select(PayoutBatch).where(PayoutBatch.workspace_id == ws,
+            PayoutBatch.status.in_(["CREATED", "PENDING", "PROCESSING"])).order_by(PayoutBatch.created_at))
+    judge = db.get(Workspace, ws).kind == "judge"
+    minimum = usd_to_micros(value("JUDGE_PAYOUT_MIN_USD", ".01") if judge else value("PAYOUT_MIN_USD", ".25"))
+    if batch:
+        rows = db.execute(select(Publisher, PayoutItem.amount_cents).join(
+            PayoutItem, PayoutItem.publisher_id == Publisher.id
+        ).where(PayoutItem.batch_id == batch.id).order_by(Publisher.id)).all()
+    else:
+        rows = []
+        for publisher in db.scalars(select(Publisher).where(Publisher.workspace_id == ws).order_by(Publisher.id)):
+            amount = ledger.available_payable(db, ws, publisher.id)
+            if amount >= max(minimum, 10000):
+                rows.append((publisher, amount // 10000))
+    # A retry of an old confirmation must not spend a later, equally-sized accrual.
+    last_batch_id = db.scalar(select(PayoutBatch.id).where(PayoutBatch.workspace_id == ws)
+                              .order_by(PayoutBatch.created_at.desc(), PayoutBatch.id.desc()).limit(1))
+    identity = [ws, batch.id if batch else None, last_batch_id, [(p.id, cents) for p, cents in rows]]
+    quote_id = hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()
+    return batch, rows, {"quote_id": quote_id, "minimum_micros": minimum,
+        "batch_id": batch.id if batch else None, "amount_cents": sum(cents for _, cents in rows),
+        "items": [{"publisher_id": p.id, "name": p.name, "amount_cents": cents} for p, cents in rows]}
+
+
+def settle(ws, batch_id=None, *, quote_id=None):
     with lock(ws):
         with session_scope() as db:
-            b = (
-                owned(db, PayoutBatch, batch_id, ws)
-                if batch_id
-                else db.scalar(
-                    select(PayoutBatch)
-                    .where(
-                        PayoutBatch.workspace_id == ws,
-                        PayoutBatch.status.in_(["CREATED", "PENDING", "PROCESSING"]),
-                    )
-                    .order_by(PayoutBatch.created_at)
-                )
-            )
+            b, payable, preview = allocation(db, ws, batch_id)
+            if quote_id is not None and quote_id != preview["quote_id"]:
+                raise HTTPException(409, "The funded payout changed. Review the latest amount and confirm again.")
             if b is None:
-                judge = db.get(Workspace, ws).kind == "judge"
-                minimum = usd_to_micros(
-                    value("JUDGE_PAYOUT_MIN_USD", ".01")
-                    if judge
-                    else value("PAYOUT_MIN_USD", ".25")
-                )
-                owing = [
-                    (p, ledger.available_payable(db, ws, p.id))
-                    for p in db.scalars(
-                        select(Publisher).where(Publisher.workspace_id == ws)
-                    )
-                ]
-                payable = [
-                    (p, amt // 10000)
-                    for p, amt in owing
-                    if amt >= minimum and amt >= 10000
-                ]
                 if not payable:
                     return {"status": "below_minimum", "items": []}
                 b = PayoutBatch(

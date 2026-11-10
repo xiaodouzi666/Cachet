@@ -5,15 +5,19 @@ import { RefreshCw } from "lucide-react";
 import { useResource } from "../lib/client";
 import { Empty, Failure, Skeleton, Tag } from "./ui";
 import type { FinancialRow, Reconcile, Royalty } from "../lib/types";
+import { useSession } from "./shell";
+import { SettlementPayout, type PayoutBatch } from "./settlement-payout";
+
 const Studio = dynamic(() => import("../studio/settlement"), {
   ssr: false,
   loading: () => <Skeleton label="Loading AG Studio" />,
 });
 export function Settlement() {
+  const session = useSession();
   const ledger = useResource<FinancialRow[]>("ledger", 12000),
     captures = useResource<FinancialRow[]>("captures", 12000),
     refunds = useResource<FinancialRow[]>("refunds", 12000),
-    payouts = useResource<FinancialRow[]>("payouts", 12000),
+    payouts = useResource<PayoutBatch[]>("payouts", 12000),
     events = useResource<FinancialRow[]>("paypal-events", 12000),
     system = useResource<{ hit_tokens: number }>("royalties/system", 12000),
     royalties = useResource<Royalty[]>("royalties", 12000),
@@ -37,6 +41,7 @@ export function Settlement() {
   const err = resources.find((r) => r.error)?.error || "";
   return (
     <div className="stack">
+      {session.state?.kind === "judge" && <SettlementPayout batches={payouts.data ?? []} refresh={refresh} />}
       <section className="panel">
         <div className="panel-head">
           <div>
