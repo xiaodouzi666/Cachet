@@ -79,10 +79,14 @@ def state(db, ws, mid):
     refunds = list(db.scalars(select(Refund).where(Refund.capture_id.in_([c.id for c in caps]), Refund.status == "COMPLETED")))
     captured_fault_refunds = [x.paypal_refund_id for x in refunds if x.paypal_refund_id and paid_faults.intersection(x.call_ids_json)]
     last = db.get(AgentRun, registration["last_run_id"]) if registration["last_run_id"] else None
-    balances = {}
+    balances, available = {}, {}
     for layer in db.scalars(select(Context).where(Context.workspace_id == ws, Context.slug.in_(["starlette", "fastapi"]))):
         balances[layer.slug] = -ledger.balance(db, ws, ledger.payable(layer.publisher_id))
-    return {**registration, "operator_test_traffic":True, "publisher_payable_micros":balances, "status":mandate.status, "last_run_status":last.status if last else None,
+        available[layer.slug] = ledger.available_payable(db, ws, layer.publisher_id)
+    return {**registration, "operator_test_traffic":True, "publisher_payable_micros":balances,
+        "publisher_available_micros":available,
+        "publisher_pending_or_reserved_micros":{slug:max(0, book) - available[slug] for slug, book in balances.items()},
+        "publisher_offset_micros":{slug:max(0, -book) for slug, book in balances.items()}, "status":mandate.status, "last_run_status":last.status if last else None,
         "authorization_id":mandate.authorization_id, "paypal_order_id":mandate.paypal_order_id,
         "captured_micros":mandate.captured_micros, "pending_micros":mandate.accrued_uncaptured_micros,
         "billable_micros":mandate.captured_micros + mandate.accrued_uncaptured_micros,
@@ -124,6 +128,12 @@ def next_delay(db, ws, run):
     return 1200
 
 
+def recording_targets_met(snapshot):
+    eligible = snapshot["publisher_available_micros"]
+    return (snapshot["threshold_captures"] >= 2 and snapshot["fault_turns"] == 6
+            and bool(snapshot["fault_refund_ids"]) and len(eligible) == 2 and min(eligible.values()) >= 250_000)
+
+
 def extend(db, ws, mid, window):
     marker = registered(db, ws, mid)
     snap = state(db, ws, mid)
@@ -135,8 +145,7 @@ def extend(db, ws, mid, window):
         raise HTTPException(409, "The current measurement window is still open")
     if snap["billable_micros"] >= 4_750_000:
         raise HTTPException(409, "The remaining budget is reserved for the recording")
-    if (snap["threshold_captures"] >= 2 and snap["fault_refund_ids"] and len(snap["publisher_payable_micros"]) == 2
-        and min(snap["publisher_payable_micros"].values()) >= 250_000):
+    if recording_targets_met(snap):
         raise HTTPException(409, "The recording targets are already satisfied")
     marker.data = {**marker.data, "extensions":window, "until":(utcnow() + timedelta(hours=3)).timestamp(),
                    "target_micros":4_750_000}

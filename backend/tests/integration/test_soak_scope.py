@@ -67,3 +67,15 @@ def test_scheduler_refuses_stale_steps_budget_and_elapsed_windows(tmp_path, monk
         extended = soak.extend(db, ws.id, m.id, 1)
         assert extended["target_micros"] < m.cap_micros and extended["extensions"] == 1
         assert soak.extend(db, ws.id, m.id, 1)["until"] == extended["until"]
+
+
+def test_recording_gate_uses_payable_funding_not_gross_earnings():
+    # These values describe a gate calculation, not a provider receipt.
+    state = {"threshold_captures":2, "fault_turns":6, "fault_refund_ids":[True],
+             "publisher_payable_micros":{"starlette":300_000,"fastapi":260_000},
+             "publisher_available_micros":{"starlette":250_000,"fastapi":240_000}}
+    assert not soak.recording_targets_met(state)
+    state["publisher_available_micros"]["fastapi"] = 250_000
+    assert soak.recording_targets_met(state)
+    state["fault_turns"] = 1
+    assert not soak.recording_targets_met(state)

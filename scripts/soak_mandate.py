@@ -13,6 +13,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from backend.app.paypal.client import PayPalClient, require, settings
+from backend.app.soak import recording_targets_met
 from e2e_demo import Demo, RateLimit, origin, save_report
 from sandbox_smoke import check, locked_journal, now
 
@@ -32,11 +33,6 @@ def save_snapshot(journal, path, snapshot):
     journal.data["latest"] = receipt
     journal.save()
     save_report(path, receipt)
-
-
-def targets_met(s):
-    return (s["threshold_captures"] >= 2 and s["fault_turns"] == 6 and bool(s["fault_refund_ids"])
-            and len(s["publisher_payable_micros"]) == 2 and min(s["publisher_payable_micros"].values()) >= 250_000)
 
 
 def run(args):
@@ -95,7 +91,7 @@ def run(args):
             operator_request(api, token, "POST", "reserve", {"mandate_id":mid, "context_id":journal.data["context_id"]})
         state = get_state()
         save_snapshot(journal, report, state)
-        if args.continue_if_needed and not targets_met(state) and (
+        if args.continue_if_needed and not recording_targets_met(state) and (
             time.time() >= state["until"] or state["billable_micros"] >= state["target_micros"]
         ):
             state = operator_request(api, token, "POST", f"{mid}/continue/{state['extensions'] + 1}", {})
@@ -132,7 +128,7 @@ def run(args):
                     "fee":c["seller_receivable_breakdown"]["paypal_fee"], "net":c["seller_receivable_breakdown"]["net_amount"]}
                     for c in captures],
                  "refund_readbacks":[{"id":f["id"], "status":f["status"], "amount":f["amount"]} for f in refunds],
-                 "recording_targets_met":bool(targets_met(state)), "reconciliation":demo.reconcile()}
+                 "recording_targets_met":bool(recording_targets_met(state)), "reconciliation":demo.reconcile()}
         save_snapshot(journal, report, state)
         print(f"Recording mandate {mid} remains ACTIVE after {state['metered_turns']} metered turns. Evidence: {report}")
 
