@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from e2e_demo import origin
+from e2e_demo import admin_for_origin, origin
 from sandbox_smoke import check
 from backend.app.agents.copilot_tools import usd
 from backend.app.paypal.client import PayPalClient, settings
@@ -36,10 +36,9 @@ def run(args):
     state = json.loads(args.state.read_text())
     base = origin(args.api)
     check(state["origin"] == base, "The journal belongs to a different backend.")
-    token = config["ADMIN_TOKEN"]
     if base.startswith("https://"):
         check(base == config.get("PUBLIC_API_URL"), "Expected the configured production API origin.")
-        token = config.get("PRODUCTION_ADMIN_TOKEN") or token
+    token = admin_for_origin(config, base)
     with httpx.Client(base_url=base, headers={"X-Admin-Token": token},
                       cookies={"cachet_workspace": state["workspace_cookie"]},
                       follow_redirects=False, timeout=180) as client:

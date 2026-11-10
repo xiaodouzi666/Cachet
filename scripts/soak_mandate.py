@@ -14,17 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from backend.app.paypal.client import PayPalClient, require, settings
 from backend.app.soak import recording_targets_met
-from e2e_demo import Demo, RateLimit, origin, save_report
+from e2e_demo import Demo, RateLimit, admin_for_origin, origin, save_report
 from sandbox_smoke import check, locked_journal, now
 
 
 PENDING_TARGETS = 3
-
-
-def admin_for_origin(config, url):
-    if urlsplit(url).hostname in ("127.0.0.1", "localhost", "::1"):
-        return require(config, "ADMIN_TOKEN")
-    return config.get("PRODUCTION_ADMIN_TOKEN") or require(config, "ADMIN_TOKEN")
 
 
 def outcome(snapshot, timestamp):

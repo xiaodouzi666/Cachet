@@ -33,6 +33,12 @@ def origin(url):
     return url.rstrip("/")
 
 
+def admin_for_origin(config, url):
+    if urlsplit(url).hostname in ("127.0.0.1", "localhost", "::1"):
+        return require(config, "ADMIN_TOKEN")
+    return config.get("PRODUCTION_ADMIN_TOKEN") or require(config, "ADMIN_TOKEN")
+
+
 def save_report(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -433,7 +439,7 @@ def execute(args, action=None):
             payment = args.payment or config.get("E2E_PAYMENT") or "wallet"
             check(payment in {"wallet", "card"}, "E2E_PAYMENT must be wallet or card.")
             url = origin(args.api or config.get("PUBLIC_API_URL") or "http://127.0.0.1:8000")
-            token = require(config, "ADMIN_TOKEN")
+            token = admin_for_origin(config, url)
             with PayPalClient(config) as pp, httpx.Client(base_url=url, headers={"X-Admin-Token":token},
                         follow_redirects=False, timeout=httpx.Timeout(240, connect=10)) as api:
                 demo = Demo(state, api, pp, config, payment, getattr(args, "require_mode", "live"))
