@@ -47,7 +47,13 @@ def end_idle_runs(now):
 
 
 def maintain():
+    from backend.app import judge_sponsor
     from backend.app.api.webhooks import retry_pending
+    with session_scope(write=False) as db:
+        pending = any(r.data["status"] not in judge_sponsor.TERMINAL
+                      for r in db.scalars(select(Control).where(Control.key.startswith(judge_sponsor.JOB))))
+    if pending:
+        judge_sponsor.kick()
 
     try:
         retry_pending()

@@ -90,10 +90,13 @@ def post(session, workspace_id, ref_type, ref_id, changes: Mapping[str, int]) ->
                 .where(Context.publisher_id == publisher.id)
                 .limit(1)
             )
+            kind = session.get(Workspace, workspace_id).kind
+            eligible = bool(public) and kind == "user"
+            if kind == "sponsor":
+                from .marketplace import sponsored_publisher
+                eligible = sponsored_publisher(session, workspace_id, publisher)
             if (
-                not public
-                or session.get(Workspace, workspace_id).kind != "user"
-                or ref_type
+                not eligible or ref_type
                 not in {
                     "call",
                     "uncaptured_dispute",

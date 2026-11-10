@@ -2,6 +2,7 @@ import secrets
 from decimal import Decimal
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Cookie,
     Depends,
     HTTPException,
@@ -152,6 +153,18 @@ def saved_application_check(db, run):
         },
         "verified_application_turn": None,
     }
+
+
+@router.post("/judge/prepare")
+def start_preparation(bg: BackgroundTasks, ws=wsdep):
+    from backend.app import judge_sponsor
+    return judge_sponsor.prepare(ws,bg)
+
+
+@router.get("/judge/preparation")
+def preparation_status(ws=wsdep):
+    from backend.app import judge_sponsor
+    return judge_sponsor.status(ws)
 
 
 @router.get("/judge/state")
