@@ -261,7 +261,10 @@ const scenes = {
     await expect(
       page.getByRole("heading", { name: "Run activity" }),
     ).toBeVisible();
-    const run = (await readState(page)).run;
+    const response=await page.request.get("/api/judge/state");
+    if(response.status()!==401 || s5) expect(response.ok()).toBe(true);
+    const workspace=response.ok()?await response.json():null;
+    const run = workspace?.run;
     if (s5) expect(run?.id).toBe(s5.runId);
     if (run) {
       await completedTurns(page, quietMark, run.id);
@@ -270,6 +273,7 @@ const scenes = {
         .getByRole("button", { name: "Inspect measured segments" })
         .click();
       await mark("workspace-measured-prefix");
+      return {workspaceId:workspace.workspace_id,runId:run.id,mode:run.mode};
     } else {
       await page.getByText("Inspect an archived GPU turn").click();
       await expect(page.getByText("Recorded GPU trace")).toBeVisible();
