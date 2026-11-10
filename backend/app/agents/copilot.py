@@ -165,6 +165,11 @@ def reply(ws, question):
             if (not isinstance(indices, list) or not indices
                     or any(type(i) is not int or not 0 <= i < len(observed) for i in indices)):
                 raise ModelFailure("The model could not ground an answer in the retrieved records.")
+            # An extractive model may omit a material fee, refund, or publisher.
+            # Present the full financial breakdown for these two statements, retaining
+            # the model's ordering and the authorized identifiers from each query.
+            if name in {"publisher_earnings", "mandate_breakdown"}:
+                indices = [*indices, *range(len(observed))]
             selected = [observed[i] for i in dict.fromkeys(indices)]
         else:
             selected = observed
