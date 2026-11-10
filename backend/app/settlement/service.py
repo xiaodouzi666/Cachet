@@ -4,7 +4,8 @@ from datetime import timedelta
 from decimal import Decimal
 from threading import RLock
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import object_session
 
 from backend.app import ledger
 from backend.app.agents.anomaly import payer_key, remember_authorized_payer
@@ -16,14 +17,14 @@ from backend.app.models import (
     Capture,
     Consumer,
     Mandate,
+    LedgerEntry,
     Refund,
-    Workspace,
     utcnow,
 )
 from backend.app.operations import Control, Operation
 from backend.app.money import usd_to_micros
 from backend.app.paypal.client import PayPalClient, capture_flag_matches, request_id
-from backend.app.settlement.capture_policy import plan_capture
+from backend.app.settlement.capture_policy import estimated_fee_cents, plan_capture
 from backend.app.settlement.mandate_fsm import transition
 
 _locks = [RLock() for _ in range(67)]
@@ -84,7 +85,30 @@ def call_once(op, send):
     return external
 
 
+def capture_threshold():
+    return usd_to_micros(value("CAPTURE_THRESHOLD_USD", "2.00"))
+
+
+def final_minimum():
+    return usd_to_micros(value("FINAL_CAPTURE_MIN_USD", "1.00"))
+
+
+def capture_preview(m):
+    threshold = capture_threshold()
+    plan = plan_capture(m.accrued_uncaptured_micros, m.cap_micros - m.captured_micros, threshold, force=True)
+    fee = estimated_fee_cents(plan.amount_cents)
+    return {"amount_cents": plan.amount_cents, "estimated_fee_cents": fee,
+            "estimated_net_cents": plan.amount_cents - fee, "below_threshold": m.accrued_uncaptured_micros < threshold}
+
+
 def view(m):
+    db = object_session(m)
+    if db is None:
+        with session_scope(write=False) as db:
+            return view(db.get(Mandate, m.id))
+    forgiven = db.scalar(select(func.coalesce(func.sum(LedgerEntry.debit_micros), 0)).where(
+        LedgerEntry.ref_id == m.id, LedgerEntry.ref_type == "writeoff", LedgerEntry.account == "platform:writeoff"))
+    fees = db.scalar(select(func.coalesce(func.sum(Capture.fee_cents), 0)).where(Capture.mandate_id == m.id))
     return {
         k: getattr(m, k)
         for k in (
@@ -101,6 +125,10 @@ def view(m):
         )
     } | {
         "mandate_id": m.id,
+        "forgiven_micros": forgiven,
+        "capture_fee_micros": fees * 10_000,
+        "capture_threshold_micros": capture_threshold(),
+        "final_capture_min_micros": final_minimum(),
         "released_micros": m.cap_micros - m.captured_micros
         if m.authorization_id and m.status in {"CLOSED", "VOIDED", "EXPIRED"}
         else 0,
@@ -222,7 +250,7 @@ def authorize(ws, identifier):
             transition(m, "AUTHORIZED")
             transition(m, "ACTIVE")
             m.authorization_id = auth["id"]
-            m.expires_at = utcnow() + timedelta(hours=72)
+            m.expires_at = utcnow() + timedelta(hours=int(value("MANDATE_MAX_AGE_H", "72")))
             remember_authorized_payer(db, m, order)
             db.get(Operation, op.id).result = {"id": auth["id"]}
             return view(m)
@@ -268,16 +296,11 @@ def capture(ws, identifier, *, final=False, force=False):
                 amount = op.payload["amount"]
                 final = op.payload["final"]
             else:
-                judge = db.get(Workspace, ws).kind == "judge"
-                threshold = usd_to_micros(
-                    value("JUDGE_CAPTURE_THRESHOLD_USD", ".02")
-                    if judge
-                    else value("CAPTURE_THRESHOLD_USD", "2")
-                )
                 plan = plan_capture(
                     m.accrued_uncaptured_micros,
                     m.cap_micros - m.captured_micros,
-                    threshold,
+                    capture_threshold(),
+                    final_min_micros=final_minimum(),
                     final=final,
                     force=force,
                     allow_partial=value("PAYPAL_CAPTURE_POLICY", "partial")
@@ -315,7 +338,10 @@ def capture(ws, identifier, *, final=False, force=False):
             disposition = pp.get_authorization(m.authorization_id)["status"]
             if not capture_flag_matches(final, remote.get("final_capture"), disposition):
                 raise ValueError("Capture flag differs from its request and authorization disposition")
-        fee = cents(remote["seller_receivable_breakdown"]["paypal_fee"])
+        breakdown = remote["seller_receivable_breakdown"]
+        fee = cents(breakdown["paypal_fee"])
+        if cents(breakdown["net_amount"]) != amount - fee:
+            raise ValueError("PayPal capture fee and net amount do not match the gross capture")
         with session_scope() as db:
             m = owned(db, Mandate, identifier, ws)
             row = db.scalar(
@@ -338,6 +364,8 @@ def capture(ws, identifier, *, final=False, force=False):
             return {
                 "id": row.id,
                 "paypal_capture_id": remote_id,
+                "net_cents": amount - fee,
+                "estimated_fee_cents": estimated_fee_cents(amount),
                 "amount_cents": amount,
                 "fee_cents": fee,
             }
@@ -408,11 +436,12 @@ def close(ws, identifier):
             raise HTTPException(409, f"PayPal authorization is still {auth['status']}")
         with session_scope() as db:
             m = owned(db, Mandate, identifier, ws)
-            ledger.close_dust(db, m)
+            had_charges = m.captured_micros or m.accrued_uncaptured_micros
+            ledger.forgive_at_close(db, m, final_minimum())
             transition(
                 m,
                 "CLOSED"
-                if m.captured_micros
+                if had_charges
                 else ("EXPIRED" if auth["status"] == "EXPIRED" else "VOIDED"),
             )
             return view(m)

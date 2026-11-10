@@ -21,7 +21,7 @@ verify-full:
 	CACHET_VERIFY_FULL=1 $(PYTHON) -m pytest -q backend/tests/unit backend/tests/integration
 
 e2e:
-	$(PYTHON) scripts/e2e_demo.py
+	$(PYTHON) scripts/e2e_demo.py $(E2E_ARGS)
 
 bench:
 	$(PYTHON) -m bench.ttft_bench

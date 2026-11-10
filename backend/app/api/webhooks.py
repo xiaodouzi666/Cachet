@@ -17,8 +17,7 @@ from backend.app.paypal.client import PayPalClient, resource_id, capture_flag_ma
 from backend.app.paypal.webhooks import EVENTS
 from backend.app.settlement.mandate_fsm import transition
 from backend.app.settlement.payout_job import refresh_batch
-from backend.app.settlement.service import authorize, cents, lock
-from backend.app.money import round_cents
+from backend.app.settlement.service import authorize, cents, final_minimum, lock
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -84,12 +83,16 @@ def mandate_event(pp, event):
             if m.status in {"VOIDED", "CLOSED", "EXPIRED"}:
                 return True
             # An externally voided authorization with an open bill needs operator reconciliation.
-            if m.status not in {"ACTIVE", "AUTHORIZED", "CLOSING"} or round_cents(m.accrued_uncaptured_micros):
+            if m.status not in {"ACTIVE", "AUTHORIZED", "CLOSING"} or (
+                m.accrued_uncaptured_micros and
+                (m.status != "CLOSING" or m.accrued_uncaptured_micros >= final_minimum())
+            ):
                 return False
             if m.status != "CLOSING":
                 transition(m, "CLOSING")
-            ledger.close_dust(db, m)
-            transition(m, "CLOSED" if m.captured_micros else "VOIDED")
+            had_charges = m.captured_micros or m.accrued_uncaptured_micros
+            ledger.forgive_at_close(db, m, final_minimum())
+            transition(m, "CLOSED" if had_charges else "VOIDED")
             return True
 
 

@@ -293,6 +293,14 @@ def flush(ws=wsdep):
     return flush_and_schedule_rewarm(ws)
 
 
+@router.get("/judge/capture-preview")
+def capture_preview(mandate_id: str, ws=wsdep):
+    with session_scope(write=False) as db:
+        if db.get(Workspace, ws).kind != "judge":
+            raise HTTPException(403, "This control requires a judge workspace")
+        return service.capture_preview(owned(db, Mandate, mandate_id, ws))
+
+
 @router.post("/judge/capture-now")
 def capture_now(body: MandateAction, ws=wsdep):
     with session_scope() as db:
@@ -343,20 +351,27 @@ def entries(ws=wsdep):
 
 @router.get("/captures")
 def captures(ws=wsdep):
-    return listing(
+    rows = listing(
         Capture,
         "id mandate_id paypal_capture_id amount_cents final fee_cents status call_ids_json created_at",
         ws,
     )
 
 
+    return [{**r, "net_cents": r["amount_cents"] - r["fee_cents"]} for r in rows]
+
+
 @router.get("/refunds")
 def refunds(ws=wsdep):
-    return listing(
+    rows = listing(
         Refund,
-        "id capture_id paypal_refund_id amount_cents reason call_ids_json status created_at",
+        "id capture_id paypal_refund_id amount_cents fee_reversal_cents reason call_ids_json status created_at",
         ws,
     )
+
+
+    return [{**r, "fee_cents": r["fee_reversal_cents"], "net_cents": r["amount_cents"] - r["fee_reversal_cents"]}
+            for r in rows]
 
 
 @router.get("/payouts")
@@ -371,9 +386,19 @@ def payouts(ws=wsdep):
         "id batch_id publisher_id paypal_item_id amount_cents fee_cents status",
         ws,
     )
-    return [
-        {**b, "items": [i for i in items if i["batch_id"] == b["id"]]} for b in batches
-    ]
+    result = []
+    for batch in batches:
+        children = [item for item in items if item["batch_id"] == batch["id"]]
+        for item in children:
+            if item["status"] == "SUCCESS":
+                item["net_cents"] = item["amount_cents"] + item["fee_cents"]
+            else:
+                item["fee_cents"] = item["net_cents"] = None
+        amount = sum(item["amount_cents"] for item in children)
+        fee = batch["fee_cents"] if children and all(item["status"] == "SUCCESS" for item in children) else None
+        result.append({**batch, "items": children, "amount_cents": amount, "fee_cents": fee,
+                       "net_cents": amount + fee if fee is not None else None})
+    return result
 
 
 @router.get("/royalties")

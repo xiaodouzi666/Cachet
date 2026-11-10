@@ -21,7 +21,7 @@ PREPARATION_TASKS = (
     "Trace FastAPI exception handling through Starlette and demonstrate a custom exception handler.",
 )
 SETTLED = {"CLOSED", "VOIDED", "EXPIRED"}
-DEFAULT_STATE = ROOT / "logs" / "demo-workspace.json"
+DEFAULT_STATE = ROOT / "logs" / "demo-workspace-v3.json"
 
 
 def origin(url):
@@ -263,36 +263,42 @@ class Demo:
                 try:
                     run = self.call("POST", "/agent/runs", {"mandate_id":mid, "context_id":self.contexts["fastapi"],
                                     **workload, "cold_fraction":.25, "est_turns":10})
-                except RateLimit as exc:
-                    # Release the unused authorization before waiting beyond the idle timeout.
-                    voided = self.call("POST", f"/mandates/{mid}/close")
-                    check(voided["status"] == "VOIDED" and not voided["captured_micros"], "Unused authorization was not released.")
-                    s.setdefault("unused_authorizations", []).append(s.pop("authorization_id"))
-                    s.pop("mandate_id"); s.pop("order_id"); s.pop("seed_reserved", None)
+                except RateLimit:
+                    # The same active mandate remains available across task admission windows.
                     self.journal.save()
-                    raise exc
+                    raise
                 s.update(run_id=run["run_id"], accepted_at=time.time())
             self.journal.save()
         rows = self.session_turns(s)
         faults = [r for r in rows if r["fault_injected_ms"]]
         s["turns"] = rows
         self.journal.save()
-        if mandate["status"] not in SETTLED:
-            self.call("POST", "/judge/capture-now", {"mandate_id":mid})
-        captured = [c for c in self.call("GET", "/captures") if c["mandate_id"] == mid]
-        # For a final-only sandbox app, release the remainder before auditing captured money.
-        if not captured and mandate["status"] not in SETTLED:
-            mandate = self.call("POST", f"/mandates/{mid}/close")
-            captured = [c for c in self.call("GET", "/captures") if c["mandate_id"] == mid]
-            s["audit_after_final_close"] = True
-        check(captured and all(c["paypal_capture_id"] and c["amount_cents"] > 0 for c in captured), "No confirmed capture for this session.")
+        if mandate["status"] not in SETTLED and purpose != "preparation":
+            preview = self.call("GET", "/judge/capture-preview?mandate_id=" + mid)
+            check("estimated_fee_cents" in preview and "estimated_net_cents" in preview, "Fee-aware preview is required.")
+            if preview["amount_cents"] > 0:
+                receipt = self.call("POST", "/judge/capture-now", {"mandate_id":mid})
+                check(receipt["amount_cents"] == preview["amount_cents"] and
+                      receipt["net_cents"] == receipt["amount_cents"] - receipt["fee_cents"], "Capture gross, fee and net differ.")
+                s["capture_now"] = {"preview":preview, "receipt":receipt}
+                self.journal.save()
         self.call("POST", "/judge/audit", {"mandate_id":mid})
+        before_close = self.call("GET", f"/mandates/{mid}")
         closed = self.call("POST", f"/mandates/{mid}/close")
-        check(closed["status"] == "CLOSED" and 0 <= closed["refunded_micros"] <= closed["captured_micros"] <= closed["cap_micros"],
+        check(closed["status"] in {"CLOSED", "VOIDED"} and
+              0 <= closed["refunded_micros"] <= closed["captured_micros"] <= closed["cap_micros"],
               "Closed mandate totals are inconsistent.")
+        if before_close["status"] not in SETTLED:
+            remainder = before_close["accrued_uncaptured_micros"]
+            if 0 < remainder < closed["final_capture_min_micros"]:
+                check(closed["forgiven_micros"] == remainder and closed["captured_micros"] == before_close["captured_micros"],
+                      "Subminimum final accrual was not forgiven.")
+        check(closed["released_micros"] == closed["cap_micros"] - closed["captured_micros"], "Released budget differs.")
         captures = [c for c in self.call("GET", "/captures") if c["mandate_id"] == mid]
         receipts = [r for r in self.call("GET", "/refunds") if r["capture_id"] in {c["id"] for c in captures}]
         if purpose == "acceptance":
+            check(captures and all(c["paypal_capture_id"] and c["net_cents"] == c["amount_cents"] - c["fee_cents"] for c in captures),
+                  "Missing real capture gross, fee or net.")
             affected = {rid for r in receipts if r["status"] == "COMPLETED" and r["amount_cents"] > 0 and r["paypal_refund_id"]
                         for rid in r["call_ids_json"]}
             check({r["id"] for r in faults} <= affected, "The three injected calls are not linked to completed PayPal refunds.")
@@ -355,7 +361,7 @@ class Demo:
         if suite and suite.get("completed") and not new_suite:
             return
         if not suite or suite.get("completed"):
-            suite = {"started":now(), "initial":accepted(), "repeats":repeats, "mode":self.mode}
+            suite = {"started":now(), "initial":accepted(), "repeats":repeats, "mode":self.mode, "settlement_policy":"fee-aware-v3"}
             self.data["acceptance_suite"] = suite
             self.journal.save()
         check(repeats == suite["repeats"], "Resume the suite using its original repeat count.")
@@ -439,6 +445,12 @@ def execute(args, action=None):
         summary.update(traffic="Operator-run sandbox test traffic", generated_at=now())
         if state.data.get("acceptance_suite"):
             summary["acceptance_suite"] = state.data["acceptance_suite"]
+            accepted = [s for s in state.data["sessions"] if s.get("accepted")]
+            suite = state.data["acceptance_suite"]
+            current = accepted[suite["initial"]:suite["initial"] + suite["repeats"]]
+            summary["settlement_policy"] = "fee-aware-v3" if len(current) == suite["repeats"] and all(
+                s.get("capture_now", {}).get("receipt", {}).get("net_cents") is not None and
+                "forgiven_micros" in s.get("closed", {}) for s in current) else "prior-or-incomplete"
         if state.data.get("seed"):
             summary["seed"] = state.data["seed"]
         if state.data.get("smoke"):

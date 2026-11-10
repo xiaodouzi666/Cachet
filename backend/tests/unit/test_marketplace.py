@@ -284,9 +284,8 @@ def test_recorded_external_usage_visible_as_aggregates_only(tmp_path):
         ]
 
 
-def test_only_an_explicit_final_rounding_subsidy_releases_uncaptured_royalties(
-    tmp_path,
-):
+@pytest.mark.parametrize("kind", ["legacy_rounding", "writeoff"])
+def test_platform_subsidy_releases_uncaptured_royalties(tmp_path, kind):
     engine = init_db(f"sqlite:///{tmp_path}/funding.db")
     with session_scope(engine) as db:
         buyer, seller = workspace(db, "user"), workspace(db, "user")
@@ -310,8 +309,16 @@ def test_only_an_explicit_final_rounding_subsidy_releases_uncaptured_royalties(
         )
         mandate.accrued_uncaptured_micros = amount
         assert ledger.available_payable(db, seller.id, ctx.publisher_id) == 0
-        ledger.close_dust(db, mandate)
-        assert ledger.balance(db, buyer.id, ledger.ROUNDING) == amount
+        if kind == "writeoff":
+            ledger.forgive_at_close(db, mandate, 1_000_000)
+            ledger.forgive_at_close(db, mandate, 1_000_000)
+            assert ledger.balance(db, buyer.id, "platform:writeoff") == amount
+            assert ledger.reverse_uncaptured(db, call, reason="dispute") == 0
+        else:
+            ledger.close_dust(db, mandate)
+            assert ledger.balance(db, buyer.id, ledger.ROUNDING) == amount
+        assert mandate.accrued_uncaptured_micros == 0
+        assert ledger.balance(db, seller.id, ledger.payable(ctx.publisher_id)) == -share
         assert ledger.available_payable(db, seller.id, ctx.publisher_id) == share
         for ws in (buyer, seller):
             assert (

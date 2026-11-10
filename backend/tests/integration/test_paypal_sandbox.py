@@ -82,3 +82,19 @@ def test_direct_sandbox_card_when_configured():
     if not config.get("SANDBOX_TEST_CARD_NUMBER") and not config.get("SANDBOX_TEST_CARD_EXPIRY"):
         pytest.skip("Optional sandbox card path is unconfigured.")
     run("card", ROOT / "logs" / f"verify-card-{uuid.uuid4()}.json")
+
+
+@pytest.mark.sandbox
+def test_fee_aware_close_and_test_capture(monkeypatch):
+    """Resume private real journals instead of creating another authorization for an already verified case."""
+    from backend.app.db import configured_url
+    from scripts.mandate_check import check_case
+    monkeypatch.setenv("DATABASE_URL", configured_url())
+    directory = ROOT / "logs" / "fee-aware-acceptance"
+    unused = check_case(directory, "unused")
+    forgiven = check_case(directory, "partial_then_forgive")
+    final = check_case(directory, "final")
+    assert unused["authorization_status"] == "VOIDED" and not unused["captures"]
+    assert forgiven["authorization_status"] == "VOIDED" and forgiven["forgiven_micros"] > 0
+    assert forgiven["judge_capture"]["actual"]["net_cents"] == forgiven["captures"][0]["net_cents"]
+    assert final["authorization_status"] == "CAPTURED" and final["captures"][-1]["requested_final"]

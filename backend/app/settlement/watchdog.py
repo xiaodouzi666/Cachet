@@ -4,7 +4,7 @@ import logging
 from datetime import timedelta
 from threading import Event, Thread
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.app.config import value
 from backend.app.db import session_scope
@@ -36,6 +36,16 @@ def recovery():
             )
 
 
+def end_idle_runs(now):
+    cutoff = now - timedelta(minutes=int(value("RUN_IDLE_END_MIN", "10")))
+    with session_scope() as db:
+        for run in db.scalars(select(AgentRun).where(AgentRun.status == "running", AgentRun.started_at <= cutoff)):
+            last_turn = db.scalar(select(func.max(Call.created_at)).where(Call.run_id == run.id))
+            if (last_turn or run.started_at) <= cutoff:
+                run.status, run.ended_at = "failed", now
+                db.add(RunEvent(run_id=run.id, event_type="error", payload={"message": "Agent run ended after inactivity."}))
+
+
 def maintain():
     from backend.app.api.webhooks import retry_pending
 
@@ -44,6 +54,7 @@ def maintain():
     except Exception:
         LOG.exception("Could not reproject pending verified webhooks")
     now = utcnow()
+    end_idle_runs(now)
     with session_scope(write=False) as db:
         mandates = list(
             db.scalars(
@@ -97,14 +108,8 @@ def maintain():
         try:
             if mandate.status == "CAPTURING":
                 capture(mandate.workspace_id, mandate.id)
-            idle_before = now - timedelta(
-                minutes=int(value("MANDATE_IDLE_CLOSE_MIN", "15"))
-            )
-            if (
-                mandate.status == "CLOSING"
-                or (mandate.expires_at and mandate.expires_at <= now)
-                or mandate.last_activity_at <= idle_before
-            ):
+            if (mandate.status == "CLOSING" or (mandate.expires_at and mandate.expires_at <= now)
+                or mandate.captured_micros + mandate.accrued_uncaptured_micros >= mandate.cap_micros):
                 close(mandate.workspace_id, mandate.id)
         except Exception:
             LOG.exception("Could not maintain mandate %s", mandate.id)

@@ -101,3 +101,34 @@ def test_rate_limit_rejection_is_atomic(tmp_path, monkeypatch):
     )
     with session_scope(write=False) as db:
         assert db.scalar(select(func.count()).select_from(LimitEvent)) == 6
+
+
+def test_idle_timeout_ends_only_running_agent_and_leaves_mandate_open(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from backend.app.models import AgentRun, Consumer, Workspace, utcnow
+    from backend.app.settlement.watchdog import end_idle_runs
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'idle.sqlite'}")
+    monkeypatch.setenv("RUN_IDLE_END_MIN", "10")
+    now = utcnow()
+    with session_scope() as db:
+        ws = Workspace(cookie_id=secrets.token_hex())
+        db.add(ws)
+        db.flush()
+        consumer = Consumer(workspace_id=ws.id, name="Timer test", salt_hex=secrets.token_hex())
+        db.add(consumer)
+        db.flush()
+        mandate = Mandate(workspace_id=ws.id, consumer_id=consumer.id, cap_micros=5_000_000, status="ACTIVE")
+        db.add(mandate)
+        db.flush()
+        runs = [AgentRun(workspace_id=ws.id, mandate_id=mandate.id, task_id="timer", task_text="Timer test",
+                         status="running", started_at=now - timedelta(minutes=age)) for age in (11, 9)]
+        db.add_all(runs)
+        db.flush()
+    end_idle_runs(now)
+    end_idle_runs(now)
+    with session_scope(write=False) as db:
+        assert db.get(Mandate, mandate.id).status == "ACTIVE"
+        assert [db.get(AgentRun, r.id).status for r in runs] == ["failed", "running"]
+        from backend.app.operations import RunEvent
+        assert db.scalar(select(func.count(RunEvent.id)).where(RunEvent.run_id == runs[0].id)) == 1

@@ -81,7 +81,7 @@ def settle(ws, batch_id=None):
                 minimum = usd_to_micros(
                     value("JUDGE_PAYOUT_MIN_USD", ".01")
                     if judge
-                    else value("PAYOUT_MIN_USD", "1")
+                    else value("PAYOUT_MIN_USD", ".25")
                 )
                 owing = [
                     (p, ledger.available_payable(db, ws, p.id))

@@ -140,6 +140,8 @@ def persist(ws, run_id, mid, owners, meter, profile, rates):
     spans = []
     with session_scope() as db:
         run = owned(db, AgentRun, run_id, ws)
+        if run.status != "running":
+            raise HTTPException(409, "Agent run has ended")
         m = owned(db, Mandate, mid, ws)
         pubs = {name: db.get(Publisher, pid) for name, pid in owners.items()}
         identity = db.get(Control, payer_key(m))
@@ -360,6 +362,8 @@ def execute(ws, identifier, context_id, tenant):
                     engine.close()
             with session_scope() as db:
                 r = owned(db, AgentRun, identifier, ws)
+                if r.status != "running":
+                    return
                 r.status = "completed"
                 r.ended_at = utcnow()
                 emit(
@@ -387,6 +391,8 @@ def execute(ws, identifier, context_id, tenant):
         logging.getLogger(__name__).exception("Run %s failed", identifier)
         with session_scope() as db:
             r = owned(db, AgentRun, identifier, ws)
+            if r.status == "failed":
+                return
             r.status = "failed"
             r.ended_at = utcnow()
             emit(db, identifier, "error", {"message": msg})

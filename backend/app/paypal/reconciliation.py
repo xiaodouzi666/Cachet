@@ -126,6 +126,8 @@ def cash(pp, report, captures, refunds, authorizations, operations):
         if remote["status"] in ledger.CAPTURED:
             fee = cents(remote["seller_receivable_breakdown"]["paypal_fee"])
             report.compare(cap.id, "capture fee", cap.fee_cents, fee)
+            report.compare(cap.id, "capture net", cap.amount_cents - cap.fee_cents,
+                           cents(remote["seller_receivable_breakdown"]["net_amount"]))
             report.clearing += amount - fee
 
 

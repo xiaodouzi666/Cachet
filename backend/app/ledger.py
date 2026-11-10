@@ -268,7 +268,7 @@ def reverse_uncaptured(session, call, *, reason="sla"):
     if reason == "sla" and not call.sla_breach:
         raise LedgerError("An SLA reversal requires a measured breach")
     mandate = _call_mandate(session, call)
-    if _txn(session, "close_dust", mandate.id):
+    if _txn(session, "close_dust", mandate.id) or _txn(session, "writeoff", mandate.id):
         # This mandate was closed below the minimum payable cent. Its open
         # principal was already absorbed by the platform at close.
         return 0
@@ -380,6 +380,19 @@ def close_dust(session, mandate):
             },
         )
         mandate.accrued_uncaptured_micros = 0
+
+
+def forgive_at_close(session, mandate, minimum):
+    """Absorb the remaining consumer receivable while keeping accrued publisher royalties payable."""
+    pending = mandate.accrued_uncaptured_micros
+    if not pending:
+        return
+    if not 0 < pending < minimum:
+        raise LedgerError("Remaining balance requires a final capture")
+    post(session, mandate.workspace_id, "writeoff", mandate.id, {
+        "platform:writeoff": pending, receivable(mandate.consumer_id): -pending,
+    })
+    mandate.accrued_uncaptured_micros = 0
 
 
 @dataclass(frozen=True)
@@ -541,14 +554,13 @@ def _funded_royalties(session, publisher_id):
         .where(Capture.status.in_(CAPTURED), Capture.paypal_capture_id.is_not(None))
     )
 
-    # If a final balance was below half a cent, close_dust explicitly expenses the unpaid
-    # principal to the platform. Only the still-unallocated share of those calls qualifies.
+    # Historical rounding subsidies and explicit write-offs fund only the unallocated share.
     dust_calls = (
         select(Call.id)
         .join(AgentRun, AgentRun.id == Call.run_id)
         .join(
             LedgerTxn,
-            (LedgerTxn.ref_type == "close_dust")
+            (LedgerTxn.ref_type.in_(["close_dust", "writeoff"]))
             & (LedgerTxn.ref_id == AgentRun.mandate_id),
         )
     )
