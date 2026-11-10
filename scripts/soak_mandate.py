@@ -16,6 +16,7 @@ from backend.app.paypal.client import PayPalClient, require, settings
 from backend.app.soak import recording_targets_met
 from e2e_demo import Demo, RateLimit, admin_for_origin, origin, save_report
 from sandbox_smoke import check, locked_journal, now
+from scripts.gpu_lease import gpu_lease
 
 
 PENDING_TARGETS = 3
@@ -119,22 +120,36 @@ def run(args):
         while True:
             save_snapshot(journal, report, state)
             check(state["status"] == "ACTIVE", "The recorded mandate is no longer active. Inspect it before continuing.")
-            if state["last_run_status"] in ("queued", "running"):
-                time.sleep(4)
-            elif state["billable_micros"] >= state["target_micros"] or time.time() >= state["until"]:
+            if state["last_run_status"] not in ("queued", "running") and (
+                state["billable_micros"] >= state["target_micros"] or time.time() >= state["until"]
+            ):
                 break
-            elif demo.call("GET", "/health")["mode"] != "live":
-                time.sleep(15)
-            elif state["last_run_status"] == "failed":
-                failed = journal.data.setdefault("failed_runs", [])
-                if state["last_run_id"] not in failed:
-                    failed.append(state["last_run_id"])
-                    journal.save()
-                check(len(failed) <= 3, "Three GPU run failures require inspection before resuming the same mandate.")
-                time.sleep(4)
-                post_step(api, token, journal, mid, state)
-            else:
-                post_step(api, token, journal, mid, state)
+            if demo.call("GET", "/health")["mode"] != "live":
+                time.sleep(10)
+                state = get_state()
+                continue
+            delay = 0
+            with gpu_lease():
+                # Another operator's full run or cache verification may have used this slot.
+                # Read the original sequence again before admitting work on the shared physical GPU.
+                state = get_state()
+                if state["last_run_status"] not in ("queued", "running") and (
+                    state["billable_micros"] < state["target_micros"] and time.time() < state["until"]
+                ):
+                    if state["last_run_status"] == "failed":
+                        failed = journal.data.setdefault("failed_runs", [])
+                        if state["last_run_id"] not in failed:
+                            failed.append(state["last_run_id"])
+                            journal.save()
+                        check(len(failed) < 3, "Three GPU run failures require inspection before resuming the same mandate.")
+                    delay = post_step(api, token, journal, mid, state)
+                state = get_state()
+                while state["last_run_status"] in ("queued", "running"):
+                    time.sleep(3)
+                    state = get_state()
+                    save_snapshot(journal, report, state)
+            if delay:
+                time.sleep(max(0, min(delay, state["until"] - time.time())))
             state = get_state()
             if state["captured_fault_turns"] and not state["fault_refund_ids"]:
                 # The real capture now includes delayed public hits. Use the normal judge audit.
@@ -163,13 +178,12 @@ def post_step(api, token, journal, mid, state):
         receipt = operator_request(api, token, "POST", f"{mid}/runs", {"sequence": sequence})
     except httpx.TransportError:
         # Read back the server sequence before retrying a lost response.
-        time.sleep(2)
-        return
+        return 2
     except RateLimit as limited:
-        time.sleep(max(0, min(limited.delay + 1, state["until"] - time.time())))
-        return
+        return limited.delay + 1
     journal.data["last_submission"] = {"sequence":sequence, "run_id":receipt["run_id"], "at":now()}
     journal.save()
+    return 0
 
 
 if __name__ == "__main__":
