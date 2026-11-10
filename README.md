@@ -10,7 +10,21 @@ A team running coding agents may repeatedly process the same framework across un
 
 ## Try it locally
 
-Use Python 3.11, Node.js 22, npm, Make and tmux. A fresh checkout can serve the UI, SQLite ledger, measured benchmarks and recorded workloads without a GPU.
+Use Docker Compose for a two-container replay deployment. From a fresh checkout, generate two independent local secrets and start the services. The SQLite ledger persists in the `ledger` volume.
+
+```sh
+test -f .env || (
+  umask 077
+  printf 'ADMIN_TOKEN=%s\nBFF_TOKEN=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > .env
+)
+docker compose up --build -d
+```
+
+Open the [local application](http://127.0.0.1:3000) and [the UI gallery](http://127.0.0.1:3000/dev/ui) to inspect the four archived coding runs. The mode badge reports replay. The API and the browser gateway bind to loopback. Set `CACHET_WEB_PORT` and `CACHET_API_PORT` before bringing the project up if those ports are already in use. Run `docker compose down` to stop it and retain the ledger.
+
+For real sandbox payments, add your own sandbox application, recipient and buyer settings from [.env.example](.env.example) to the same file and recreate the services. Real PayPal authorization is required to spend a budget in either inference mode. To use your GPU, set `CACHET_COMPOSE_GPU_URL` to the SGLang endpoint reachable from the API container and `CACHET_COMPOSE_GPU_KEY` to that engine's token. Restart the API and verify that [its health response](http://127.0.0.1:8000/api/health) reports `live`.
+
+For native development, use Python 3.11, Node.js 22, npm, Make and tmux.
 
 ```sh
 make setup

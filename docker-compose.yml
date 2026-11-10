@@ -1,0 +1,48 @@
+services:
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: sqlite:////var/data/cachet.db
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      BFF_TOKEN: ${BFF_TOKEN:?Set BFF_TOKEN in .env}
+      PUBLIC_WEB_URL: http://127.0.0.1:${CACHET_WEB_PORT:-3000}
+      PAYPAL_ENV: sandbox
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
+      PUBLISHER_STARLETTE_EMAIL: ${PUBLISHER_STARLETTE_EMAIL:-}
+      PUBLISHER_FASTAPI_EMAIL: ${PUBLISHER_FASTAPI_EMAIL:-}
+      JUDGE_BUYER_EMAIL: ${JUDGE_BUYER_EMAIL:-}
+      JUDGE_BUYER_PASSWORD: ${JUDGE_BUYER_PASSWORD:-}
+      SANDBOX_TEST_CARD_NUMBER: ${SANDBOX_TEST_CARD_NUMBER:-}
+      SANDBOX_TEST_CARD_EXPIRY: ${SANDBOX_TEST_CARD_EXPIRY:-}
+      SGLANG_BASE_URL: ${CACHET_COMPOSE_GPU_URL:-http://host.docker.internal:30000}
+      SGLANG_API_KEY: ${CACHET_COMPOSE_GPU_KEY:-}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:${CACHET_API_PORT:-8000}:10000"
+    volumes:
+      - ledger:/var/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:10000/api/health',timeout=5).read()"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY: ${AG_STUDIO_LICENSE_KEY:-}
+    environment:
+      CACHET_API_URL: http://api:10000
+      PUBLIC_WEB_URL: http://127.0.0.1:${CACHET_WEB_PORT:-3000}
+      BFF_TOKEN: ${BFF_TOKEN:?Set BFF_TOKEN in .env}
+    ports:
+      - "127.0.0.1:${CACHET_WEB_PORT:-3000}:10000"
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  ledger:
