@@ -1458,3 +1458,24 @@ td {
 .check-receipt .receipt {
   max-height: 18rem;
 }
+
+
+.guide-source, .guide-facts > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 9px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+.guide-source { flex-wrap: wrap; }
+.guide-source strong { text-transform: capitalize; }
+.guide-facts > div { justify-content: space-between; }
+.guide-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+
+.money-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 16px; }
+.money-strip .money-val { font-size: clamp(.9rem, 1.8vw, 1.55rem); overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .money-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .money-strip > div:last-child { grid-column: 1 / -1; }
+}

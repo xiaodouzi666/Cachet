@@ -441,7 +441,7 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
     return start_run(body, bg, request, ws)
 
 
-def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, sponsor_sequence=None):
+def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, sponsor_sequence=None, guided_main=False):
     serving = health()
     mode = serving["mode"]
     profile = calibration(mode)
@@ -449,6 +449,11 @@ def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, 
         raise HTTPException(503, "Inference is unavailable")
     with session_scope() as db:
         m = owned(db, Mandate, body.mandate_id, ws)
+        if guided_main:
+            prior_main = db.get(Control, "judge-main-run:"+m.id)
+            if prior_main:
+                prior = owned(db, AgentRun, prior_main.data["run_id"], ws)
+                return {"run_id":prior.id,"status":prior.status}
         if sponsor_sequence is not None:
             from backend.app import judge_sponsor
             previous = judge_sponsor.grant(db, ws, m.id, sponsor_sequence, body.context_id, body.task_id)
@@ -460,6 +465,9 @@ def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, 
             if db.get(Workspace, ws).kind != "judge":
                 raise HTTPException(403, "A judge workspace is required")
             parent = owned(db, AgentRun, guided_parent, ws)
+            selected = db.get(Control, "judge-main-run:"+m.id)
+            if not selected or selected.data["run_id"] != parent.id:
+                raise HTTPException(409, "Select the coding task from this walkthrough")
             prior = db.get(Control, "judge-fault-parent:" + parent.id)
             if prior:
                 resumed = owned(db, AgentRun, prior.data["run_id"], ws)
@@ -543,6 +551,8 @@ def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, 
         )
         db.add(r)
         db.flush()
+        if guided_main:
+            db.add(Control(key="judge-main-run:"+m.id, data={"run_id":r.id}))
         if sponsor_sequence is not None:
             r.quote_json = {**r.quote_json, "sponsor_sequence": sponsor_sequence}
         if guided_parent:

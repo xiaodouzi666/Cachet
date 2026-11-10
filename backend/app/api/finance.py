@@ -155,8 +155,12 @@ def saved_application_check(db, run):
     }
 
 
+class PrepareWalkthrough(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 @router.post("/judge/prepare")
-def start_preparation(bg: BackgroundTasks, ws=wsdep):
+def start_preparation(body: PrepareWalkthrough, bg: BackgroundTasks, ws=wsdep):
     from backend.app import judge_sponsor
     return judge_sponsor.prepare(ws,bg)
 

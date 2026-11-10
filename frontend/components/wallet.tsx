@@ -59,9 +59,11 @@ const terminal = new Set(["CLOSED", "VOIDED", "EXPIRED", "FAILED"]);
 export function Wallet({
   mandate,
   onUpdate,
+  guided = false,
 }: {
   mandate: Mandate | null;
   onUpdate: () => Promise<void>;
+  guided?: boolean;
 }) {
   const { state } = useSession();
   const [cap, setCap] = useState("5.00"),
@@ -216,6 +218,7 @@ export function Wallet({
             Budget (USD)
             <input
               type="number"
+              readOnly={guided}
               min=".01"
               max="20"
               step=".01"
@@ -272,7 +275,7 @@ export function Wallet({
               Cancel unapproved order
             </button>
           )}
-          {!canCreate && (
+          {!canCreate && !guided && (
             <button
               className="secondary"
               disabled={busy}

@@ -230,7 +230,7 @@ function Money({ value }: { value: number | undefined }) {
   }, [value]);
   return (
     <span ref={ref} className="money-val">
-      {usd(value, 2)}
+      {usd(value, value != null && value % 10_000 !== 0 ? 6 : 2)}
     </span>
   );
 }
@@ -241,7 +241,9 @@ export function MoneyStrip({ mandate }: { mandate: Mandate | null }) {
       {[
         ["Authorized", authorized],
         ["Captured", mandate?.captured_micros],
-        ["Released", mandate?.released_micros],
+        ["PayPal fees", mandate?.capture_fee_micros],
+        ["Forgiven", mandate?.forgiven_micros],
+        ["Released authorization", mandate?.released_micros],
       ].map(([label, value]) => (
         <div key={label}>
           <small>{label}</small>

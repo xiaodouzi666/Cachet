@@ -6,10 +6,10 @@ export const runtime = "nodejs";
 
 const id = "[A-Za-z0-9_-]+";
 const reads = new RegExp(
-  `^(health|reference-turn|sources|benchmarks|tasks|contexts(/${id})?|mandates/${id}|agent/runs/${id}/events|judge/(state|capture-preview)|ledger|captures|refunds|payouts|royalties|reconcile)$`,
+  `^(health|reference-turn|sources|benchmarks|tasks|contexts(/${id})?|mandates/${id}|agent/runs/${id}/events|judge/(state|capture-preview|walkthrough|preparation)|ledger|captures|refunds|payouts|royalties|reconcile)$`,
 );
 const writes = new RegExp(
-  `^(publishers|contexts|contexts/${id}/warm|quote|mandates|mandates/card|mandates/${id}/(authorize|close)|agent/runs|copilot(/confirm)?|judge/(workspace|fault|flush-cache|capture-now|fault-capture|audit|settle))$`,
+  `^(publishers|contexts|contexts/${id}/warm|quote|mandates|mandates/card|mandates/${id}/(authorize|close)|agent/runs|copilot(/confirm)?|judge/(workspace|prepare|task|finish|fault-run|fault-audit|fault|flush-cache|capture-now|fault-capture|audit|settle))$`,
 );
 const cookieName = "cachet_workspace";
 

@@ -34,6 +34,8 @@ export type Mandate = {
   cap_micros: number;
   captured_micros: number;
   released_micros?: number;
+  forgiven_micros?: number;
+  capture_fee_micros?: number;
   accrued_uncaptured_micros?: number;
   refunded_micros?: number;
   authorization_id?: string;
@@ -54,6 +56,7 @@ export type ApplicationEvidence = {
 };
 export type Run = ApplicationEvidence & {
   id: string;
+  task_id?: string;
   status: string;
   decision?: string;
   operator_seeded?: boolean;
