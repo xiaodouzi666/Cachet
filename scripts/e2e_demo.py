@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import fcntl
+from contextlib import contextmanager
 import os
 import time
 from decimal import Decimal
@@ -47,6 +49,15 @@ def save_report(path, data):
         handle.flush()
         os.fsync(handle.fileno())
     tmp.replace(path)
+
+
+@contextmanager
+def gpu_lease():
+    path = Path(os.environ.get("CACHET_GPU_LEASE") or ROOT / ".cache" / "night-gpu.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 class Demo:
@@ -106,25 +117,40 @@ class Demo:
             self.journal.save()
         check(state["kind"] == workspace_kind, "The operator journal workspace kind differs.")
         self.data["health"] = {key: health.get(key) for key in ("service", "version", "mode", "gpu", "model", "build")}
-        warm = {}
-        for slug, email in zip(SOURCES, emails):
-            publisher = self.call("POST", "/publishers", {"name":slug.capitalize() + " maintainer", "paypal_email":email})
-            self.publishers[slug] = publisher["id"]
-            ctx = self.call("POST", "/contexts", {"publisher_id":publisher["id"], "source_slug":slug,
-                                                 "parent_id":self.contexts.get("starlette") if slug == "fastapi" else None})
-            self.contexts[slug] = ctx["id"]
-            # Demand a new real warm probe, including when resuming a previously hot context.
-            self.call("POST", f"/contexts/{ctx['id']}/warm")
-            deadline = time.monotonic() + 240
-            while True:
-                ctx = self.call("GET", f"/contexts/{ctx['id']}")
-                if ctx["status"] == "hot" and (ctx.get("last_probe_hit_ratio") or 0) >= .95 and ctx.get("last_probe_at"):
-                    break
-                check(time.monotonic() < deadline, f"No confirmed warm probe for {slug}.")
-                time.sleep(1)
-            warm[slug] = {key:ctx[key] for key in ("id", "publisher_id", "token_len", "last_probe_hit_ratio", "last_probe_at")}
-        self.data["warm"] = warm
-        self.journal.save()
+        with gpu_lease():
+            warm = {}
+            for slug, email in zip(SOURCES, emails):
+                publisher = self.call("POST", "/publishers", {"name":slug.capitalize() + " maintainer", "paypal_email":email})
+                self.publishers[slug] = publisher["id"]
+                ctx = self.call("POST", "/contexts", {"publisher_id":publisher["id"], "source_slug":slug,
+                                                     "parent_id":self.contexts.get("starlette") if slug == "fastapi" else None})
+                self.contexts[slug] = ctx["id"]
+                # Demand a new real warm probe, including when resuming a previously hot context.
+                self.call("POST", f"/contexts/{ctx['id']}/warm")
+                deadline = time.monotonic() + 240
+                while True:
+                    ctx = self.call("GET", f"/contexts/{ctx['id']}")
+                    if ctx["status"] == "hot" and (ctx.get("last_probe_hit_ratio") or 0) >= .95 and ctx.get("last_probe_at"):
+                        break
+                    check(time.monotonic() < deadline, f"No confirmed warm probe for {slug}.")
+                    time.sleep(1)
+                warm[slug] = {key:ctx[key] for key in ("id", "publisher_id", "token_len", "last_probe_hit_ratio", "last_probe_at")}
+            self.data["warm"] = warm
+            self.journal.save()
+
+    def warm_for_acceptance(self):
+        ctx = self.contexts["fastapi"]
+        before = self.call("GET", "/contexts/" + ctx)
+        self.call("POST", "/contexts/" + ctx + "/warm")
+        deadline = time.monotonic() + 240
+        while time.monotonic() < deadline:
+            observed = self.call("GET", "/contexts/" + ctx)
+            if (observed["status"] == "hot" and (observed.get("last_probe_hit_ratio") or 0) >= .95
+                    and observed.get("last_probe_at") and observed["last_probe_at"] != before.get("last_probe_at")):
+                return {k:observed[k] for k in ("id", "token_len", "last_probe_hit_ratio", "last_probe_at")}
+            time.sleep(1)
+        raise RuntimeError("Admission requires a freshly confirmed warm probe for the same context.")
+
 
     def payable(self):
         result = {p:0 for p in self.publishers.values()}
@@ -252,31 +278,34 @@ class Demo:
             check(reserved["reserved_mandate_id"] == mid, "Seed reservation refers to a different mandate.")
             s["seed_reserved"] = True
             self.journal.save()
-        if not s.get("run_id"):
-            # A previous process may have accepted the POST and lost its response.
-            last = self.call("GET", "/judge/state").get("run")
-            if last and last["mandate_id"] == mid:
-                s.update(run_id=last["id"], accepted_at=time.time())
-            else:
-                check(mandate["status"] == "ACTIVE", "This mandate closed before a run started. Inspect its sandbox authorization.")
-                if purpose == "acceptance":
-                    self.call("POST", "/judge/fault", {"ttft_delay_ms":1200, "calls":3})
-                workload = {"task_id": "rate-limit"}
-                if purpose == "preparation":
-                    index = sum(p["purpose"] == "preparation" for p in self.sessions[:self.sessions.index(s)])
-                    workload = {"task_id": "custom", "task_text": PREPARATION_TASKS[index % len(PREPARATION_TASKS)]}
-                s["workload"] = workload
-                self.journal.save()
-                try:
-                    run = self.call("POST", "/agent/runs", {"mandate_id":mid, "context_id":self.contexts["fastapi"],
-                                    **workload, "cold_fraction":.25, "est_turns":10})
-                except RateLimit:
-                    # The same active mandate remains available across task admission windows.
+        with gpu_lease():
+            if not s.get("run_id"):
+                # A previous process may have accepted the POST and lost its response.
+                last = self.call("GET", "/judge/state").get("run")
+                if last and last["mandate_id"] == mid:
+                    s.update(run_id=last["id"], accepted_at=time.time())
+                else:
+                    check(mandate["status"] == "ACTIVE", "This mandate closed before a run started. Inspect its sandbox authorization.")
+                    if purpose == "acceptance":
+                        s["admission_warm"] = self.warm_for_acceptance()
+                        self.journal.save()
+                        self.call("POST", "/judge/fault", {"ttft_delay_ms":1200, "calls":3})
+                    workload = {"task_id": "rate-limit"}
+                    if purpose == "preparation":
+                        index = sum(p["purpose"] == "preparation" for p in self.sessions[:self.sessions.index(s)])
+                        workload = {"task_id": "custom", "task_text": PREPARATION_TASKS[index % len(PREPARATION_TASKS)]}
+                    s["workload"] = workload
                     self.journal.save()
-                    raise
-                s.update(run_id=run["run_id"], accepted_at=time.time())
-            self.journal.save()
-        rows = self.session_turns(s)
+                    try:
+                        run = self.call("POST", "/agent/runs", {"mandate_id":mid, "context_id":self.contexts["fastapi"],
+                                        **workload, "cold_fraction":.25, "est_turns":10})
+                    except RateLimit:
+                        # The same active mandate remains available across task admission windows.
+                        self.journal.save()
+                        raise
+                    s.update(run_id=run["run_id"], accepted_at=time.time())
+                self.journal.save()
+            rows = self.session_turns(s)
         faults = [r for r in rows if r["fault_injected_ms"]]
         s["turns"] = rows
         self.journal.save()
