@@ -27,6 +27,9 @@ def test_operator_soak_needs_independent_secret_and_workspace(tmp_path, monkeypa
         route = "/api/operator/soak-registration"
         admin = {"X-Admin-Token":general}
         full = {**admin, "X-Cachet-Soak-Token":operator}
+        limited = secrets.token_urlsafe(32)
+        monkeypatch.setenv("BFF_TOKEN", limited)
+        assert client.get(route, headers={"X-Gateway-Token": limited, "X-Cachet-Soak-Token": operator}).status_code == 403
         assert client.get(route, headers=admin).status_code == 403
         assert client.get(route, headers={"X-Cachet-Soak-Token":operator}).status_code == 403
         assert client.get(route, headers={**admin, "X-Cachet-Soak-Token":general}).status_code == 403
