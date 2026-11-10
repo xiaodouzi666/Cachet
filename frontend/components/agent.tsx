@@ -24,7 +24,7 @@ import { GeneratedApplication } from "./application-check";
 import { Wallet } from "./wallet";
 
 type StreamItem = { event: string; text: string; label?: string };
-function RunFeed({
+export function RunFeed({
   run,
   onComplete,
 }: {

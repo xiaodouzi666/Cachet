@@ -90,10 +90,13 @@ def post(session, workspace_id, ref_type, ref_id, changes: Mapping[str, int]) ->
                 .where(Context.publisher_id == publisher.id)
                 .limit(1)
             )
+            kind = session.get(Workspace, workspace_id).kind
+            eligible = bool(public) and kind == "user"
+            if kind == "sponsor":
+                from .marketplace import sponsored_publisher
+                eligible = sponsored_publisher(session, workspace_id, publisher)
             if (
-                not public
-                or session.get(Workspace, workspace_id).kind != "user"
-                or ref_type
+                not eligible or ref_type
                 not in {
                     "call",
                     "uncaptured_dispute",
@@ -303,8 +306,23 @@ def _open_calls(session, mandate):
     )
 
 
-def record_capture(session, capture):
-    """Book a confirmed PayPal capture. FIFO allocates principal down to the microdollar."""
+def targeted_capture_parts(session, calls, already_captured):
+    """Allocate only whole cents, proportionally to the still-open principal of these measured calls."""
+    open_parts = {c.id: _open_parts(session, c) for c in calls}
+    identifiers = [c.id for c in calls if open_parts[c.id].principal > 0]
+    weights = [open_parts[k].principal for k in identifiers]
+    cash = sum(weights) // MICROS_PER_CENT * MICROS_PER_CENT
+    if not cash:
+        raise LedgerError("The three measured calls do not yet cover one collectible cent")
+    shares = {k: n for k, n in zip(identifiers, allocate(cash, weights)) if n > 0}
+    if any(call.id not in already_captured and (call.id not in shares or
+           open_parts[call.id].portion(shares[call.id]).public == 0) for call in calls):
+        raise LedgerError("A fault turn has insufficient remaining public principal for a real capture")
+    return shares
+
+
+def record_capture(session, capture, *, allocations=None):
+    """Book confirmed cash against the saved targeted allocation or the normal FIFO order."""
     if capture.status not in CAPTURED or not capture.paypal_capture_id:
         raise LedgerError("A confirmed PayPal capture is required")
     session.add(capture)
@@ -321,15 +339,23 @@ def record_capture(session, capture):
         or (capture.final and capture.amount_cents != round_cents(pending))
     ):
         raise LedgerError("Confirmed capture differs from the authorized accrual")
+    if allocations is not None and (capture.final or sum(allocations.values()) != to_settle or
+                                    any(type(n) is not int or n <= 0 for n in allocations.values())):
+        raise LedgerError("Targeted allocations do not match the confirmed partial capture")
     remainder = to_settle
     ids = []
     for call in _open_calls(session, mandate):
         if remainder == 0:
             break
-        open_parts = _open_parts(session, call)
-        if not open_parts.principal:
+        if allocations is not None and call.id not in allocations:
             continue
-        part = open_parts.portion(min(remainder, open_parts.principal))
+        open_parts = _open_parts(session, call)
+        take = allocations[call.id] if allocations is not None else min(remainder, open_parts.principal)
+        if not take:
+            continue
+        if take > open_parts.principal:
+            raise LedgerError("Targeted allocation exceeds the remaining call principal")
+        part = open_parts.portion(take)
         session.add(
             CaptureAllocation(
                 workspace_id=mandate.workspace_id,

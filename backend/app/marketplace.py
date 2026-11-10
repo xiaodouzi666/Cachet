@@ -3,8 +3,8 @@
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 
-from .operations import Control
 from .models import Call, Context, MarketListing, RoyaltyUsage, Workspace
+from .operations import Control
 
 
 def visible_contexts(db, workspace_id):
@@ -13,6 +13,10 @@ def visible_contexts(db, workspace_id):
     ) & Context.workspace_id.in_(select(Workspace.id).where(Workspace.kind == "user"))
     if workspace_id is None:
         clause = public
+    elif db.get(Workspace, workspace_id).kind == "sponsor":
+        grant = db.get(Control, "sponsor-target:" + workspace_id)
+        allowed = grant.data if grant else {}
+        clause = (Context.workspace_id == allowed.get("viewer")) & Context.id.in_(allowed.get("contexts", []))
     elif db.get(Workspace, workspace_id).kind == "judge":
         clause = Context.workspace_id == workspace_id
     else:
@@ -27,6 +31,22 @@ def visible_context(db, identifier, workspace_id):
     if context is None:
         raise HTTPException(404, "Published context was not found")
     return context
+
+
+def sponsored_publisher(db, sponsor_id, publisher):
+    """Authorize only the two configured recipients registered to this one preparation job."""
+    from .config import value
+    grant = db.get(Control, "sponsor-target:" + sponsor_id)
+    if not grant or grant.data.get("viewer") != publisher.workspace_id:
+        return False
+    for slug, pid, cid in zip(("starlette", "fastapi"), grant.data["publishers"], grant.data["contexts"], strict=True):
+        if pid != publisher.id:
+            continue
+        expected = value("PUBLISHER_" + slug.upper() + "_EMAIL").strip().casefold()
+        context = db.get(Context, cid)
+        return bool(expected and publisher.paypal_receiver_email.strip().casefold() == expected and context
+                    and context.workspace_id == publisher.workspace_id and context.publisher_id == pid and context.slug == slug)
+    return False
 
 
 def parent_id(db, ctx):

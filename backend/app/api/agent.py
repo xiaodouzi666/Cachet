@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from backend.app import ledger, marketplace, soak
 from backend.app.agents.anomaly import payer_key, same_payer_layers
-from backend.app.agents.inference import live_turns
+from backend.app.agents.inference import FAULT_FOLLOWUPS, live_turns
 from backend.app.agents.quote_reason import generate_reason, recorded_reason
 from backend.app.agents.tasks import TASKS, STEPS
 from backend.app.api.access import gateway, client_ip, current_workspace, limit, owned
@@ -27,6 +27,9 @@ from backend.app.gateway.sglang_client import Engine
 from backend.app.models import (
     AgentRun,
     Call,
+    Capture,
+    Context,
+    Workspace,
     Consumer,
     Mandate,
     Publisher,
@@ -282,6 +285,12 @@ def execute(ws, identifier, context_id, tenant):
                 r.started_at = utcnow()
                 config = r.quote_json
                 mid = r.mandate_id
+                parent_run = config.get("guided_followup_of")
+                prior_answers = None
+                if parent_run:
+                    prior_answers = list(db.scalars(select(Call.output_text).where(
+                        Call.workspace_id == ws, Call.run_id == parent_run
+                    ).order_by(Call.turn)))
                 task = r.task_text
                 task_id = r.task_id
                 mode = r.mode
@@ -311,8 +320,11 @@ def execute(ws, identifier, context_id, tenant):
                     raise ValueError(
                         "Hosted calibration changed after this run was quoted."
                     )
+                if parent_run:
+                    explanation = {"decision": config["decision"], "reason": "Three marked latency-test calls continue the authorized coding task using the shared two-layer context."}
                 if engine is not None:
-                    explanation = generate_reason(engine, config)
+                    if not parent_run:
+                        explanation = public_explanation(generate_reason(engine, config))
                     prefix = Prefix(engine, ctx.slug)
                     turns = live_turns(
                         engine,
@@ -322,7 +334,8 @@ def execute(ws, identifier, context_id, tenant):
                         task,
                         buy,
                         builtin_task=task_id in TASKS,
-                        fault_source=lambda: next_fault(ws, identifier),
+                        prior_answers=prior_answers,
+                        fault_source=(lambda: 1200) if parent_run else (lambda: next_fault(ws, identifier)),
                         pending_flush=(
                             (lambda: pending_flush_id(ws))
                             if mode == "live" and buy
@@ -330,17 +343,22 @@ def execute(ws, identifier, context_id, tenant):
                         ),
                     )
                 else:
-                    checked_track = load(
-                        task_id, buy, source_chain=source_chain, request_quote=config
-                    )
-                    explanation = recorded_reason(checked_track["quote"])
-                    turns = replay_turns(checked_track, owners, lambda: next_fault(ws, identifier))
+                    if parent_run:
+                        # The archive contains ten measured turns. Label the last three as replayed
+                        # test calls and keep local call numbering separate from the archive.
+                        archive = load("rate-limit", buy, source_chain=source_chain)
+                        last_three = [{**t, "turn": i} for i, t in enumerate(archive["turns"][-3:], 1)]
+                        turns = replay_turns({"turns": last_three}, owners, lambda: 1200)
+                    else:
+                        checked_track = load(task_id, buy, source_chain=source_chain, request_quote=config)
+                        explanation = public_explanation(recorded_reason(checked_track["quote"]))
+                        turns = replay_turns(checked_track, owners, lambda: next_fault(ws, identifier))
                 with session_scope() as db:
                     emit(
                         db,
                         identifier,
                         "decision",
-                        {"decision": config["decision"], **public_explanation(explanation)},
+                        {"decision": config["decision"], **explanation},
                     )
                 for meter in ensure_budget_before_next(turns, ws, mid, rates):
                     if engine is not None:
@@ -423,7 +441,7 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
     return start_run(body, bg, request, ws)
 
 
-def start_run(body, bg, request, ws, *, soak_sequence=None):
+def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, sponsor_sequence=None, guided_main=False):
     serving = health()
     mode = serving["mode"]
     profile = calibration(mode)
@@ -431,6 +449,37 @@ def start_run(body, bg, request, ws, *, soak_sequence=None):
         raise HTTPException(503, "Inference is unavailable")
     with session_scope() as db:
         m = owned(db, Mandate, body.mandate_id, ws)
+        if guided_main:
+            prior_main = db.get(Control, "judge-main-run:"+m.id)
+            if prior_main:
+                prior = owned(db, AgentRun, prior_main.data["run_id"], ws)
+                return {"run_id":prior.id,"status":prior.status}
+        if sponsor_sequence is not None:
+            from backend.app import judge_sponsor
+            previous = judge_sponsor.grant(db, ws, m.id, sponsor_sequence, body.context_id, body.task_id)
+            if previous:
+                return previous
+            if mode != "live" or body.task_text:
+                raise HTTPException(409, "Sponsor traffic requires its registered live built-in task")
+        if guided_parent:
+            if db.get(Workspace, ws).kind != "judge":
+                raise HTTPException(403, "A judge workspace is required")
+            parent = owned(db, AgentRun, guided_parent, ws)
+            selected = db.get(Control, "judge-main-run:"+m.id)
+            if not selected or selected.data["run_id"] != parent.id:
+                raise HTTPException(409, "Select the coding task from this walkthrough")
+            prior = db.get(Control, "judge-fault-parent:" + parent.id)
+            if prior:
+                resumed = owned(db, AgentRun, prior.data["run_id"], ws)
+                return {"run_id": resumed.id, "status": resumed.status}
+            count = db.scalar(select(func.count()).select_from(Call).where(Call.run_id == parent.id))
+            if (parent.mandate_id != m.id or parent.status != "completed" or parent.task_id not in TASKS
+                    or parent.quote_json.get("guided_followup_of") or count != len(STEPS)):
+                raise HTTPException(409, "Complete the original ten-turn task on this mandate")
+            if parent.mode != mode:
+                raise HTTPException(409, "The original inference mode must be available to continue")
+            if not db.scalar(select(Capture.id).where(Capture.mandate_id == m.id, Capture.status.in_(ledger.CAPTURED))):
+                raise HTTPException(409, "Confirm the initial sandbox capture before testing a refund")
         soak_marker = None
         if soak_sequence is not None:
             soak_marker, previous = soak.admit(db, ws, m.id, soak_sequence)
@@ -454,21 +503,21 @@ def start_run(body, bg, request, ws, *, soak_sequence=None):
                 raise HTTPException(422, "Free-text tasks require live inference")
             task = body.task_text
             key = "custom"
-        elif body.task_id in TASKS and TASKS[body.task_id][0] == ctx.slug:
+        elif body.task_id in TASKS and (TASKS[body.task_id][0] == ctx.slug or (guided_parent and ctx.slug == "fastapi")):
             key = body.task_id
             task = TASKS[key][1]
         else:
             raise HTTPException(
                 422, "Select a built-in task for this context or supply a custom task"
             )
-        if soak_marker is None:
+        if soak_marker is None and sponsor_sequence is None:
             limit(db, ["runs:" + ws], 3, 3600)
             limit(db, ["runs-ip:" + client_ip(request)], int(value("RUNS_PER_IP_HOUR", "20")), 3600)
         else:
             limit(db, ["operator-soak:" + m.id], 240, 3600)
         layers = chain(db, ctx)
         q = quote(
-            sum(c.token_len for c in layers), len(STEPS), body.cold_fraction, profile
+            sum(c.token_len for c in layers), len(FAULT_FOLLOWUPS) if guided_parent else len(STEPS), body.cold_fraction, profile
         )
         if mode == "hosted":
             q["calibration_id"] = fingerprint(profile)
@@ -476,7 +525,9 @@ def start_run(body, bg, request, ws, *, soak_sequence=None):
                 raise HTTPException(
                     503, "Hosted calibration changed. Request a fresh quote."
                 )
-        if mode == "replay":
+        if guided_parent and q["decision"] != "buy":
+            raise HTTPException(409, "The current tariff does not select the shared source required by the SLA test")
+        if mode == "replay" and not guided_parent:
             load(
                 key,
                 q["decision"] == "buy",
@@ -500,6 +551,14 @@ def start_run(body, bg, request, ws, *, soak_sequence=None):
         )
         db.add(r)
         db.flush()
+        if guided_main:
+            db.add(Control(key="judge-main-run:"+m.id, data={"run_id":r.id}))
+        if sponsor_sequence is not None:
+            r.quote_json = {**r.quote_json, "sponsor_sequence": sponsor_sequence}
+        if guided_parent:
+            r.quote_json = {**r.quote_json, "guided_followup_of": guided_parent, "fault_injected_ms": 1200}
+            db.add(Control(key="judge-fault-run:"+r.id, data={"workspace_id": ws, "mandate_id": m.id}))
+            db.add(Control(key="judge-fault-parent:"+guided_parent, data={"run_id": r.id}))
         if soak_marker:
             data = soak_marker.data
             soak_marker.data = {**data, "sequence":soak_sequence, "last_run_id":r.id}
@@ -512,6 +571,43 @@ def start_run(body, bg, request, ws, *, soak_sequence=None):
         emit(db, r.id, "queued", {"position": position, "mode": mode})
         bg.add_task(execute, ws, r.id, ctx.id, db.get(Consumer, m.consumer_id).salt_hex)
         return {"run_id": r.id, "status": r.status}
+
+
+class GuidedAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mandate_id: str
+    run_id: str
+
+
+@router.post("/judge/fault-run")
+def start_fault_followup(body: GuidedAction, bg: BackgroundTasks, request: Request, ws=wsdep):
+    with session_scope(write=False) as db:
+        parent = owned(db, AgentRun, body.run_id, ws)
+        if parent.mandate_id != body.mandate_id:
+            raise HTTPException(409, "The task belongs to another mandate")
+        ctx = db.scalar(select(Context).where(Context.workspace_id == ws, Context.slug == "fastapi"))
+        if not ctx:
+            raise HTTPException(409, "Publish the two-layer FastAPI context first")
+        inputs = Start(mandate_id=body.mandate_id, context_id=ctx.id, task_id=parent.task_id, cold_fraction=.25)
+    return start_run(inputs, bg, request, ws, guided_parent=body.run_id)
+
+
+@router.post("/judge/fault-audit")
+def audit_fault_followup(body: GuidedAction, ws=wsdep):
+    from backend.app.settlement.audit import audit
+    with session_scope(write=False) as db:
+        run = owned(db, AgentRun, body.run_id, ws)
+        marker = db.get(Control, "judge-fault-run:"+run.id)
+        if not marker or marker.data != {"workspace_id":ws,"mandate_id":body.mandate_id} or run.status != "completed":
+            raise HTTPException(409, "Complete the three marked test turns on this mandate first")
+        calls = list(db.scalars(select(Call).where(Call.run_id == run.id, Call.workspace_id == ws)))
+        if len(calls) != len(FAULT_FOLLOWUPS) or any(not c.sla_breach or not c.public_charge_micros or c.fault_injected_ms < 1200 for c in calls):
+            raise HTTPException(409, "The three test calls must each show a measured public-hit SLA breach")
+        captured = {cid for cap in db.scalars(select(Capture).where(Capture.mandate_id == body.mandate_id, Capture.status.in_(ledger.CAPTURED)))
+                    for cid in cap.call_ids_json}
+        if not all(c.id in captured for c in calls):
+            raise HTTPException(409, "Confirm capture coverage of all three test calls before auditing")
+    return audit(ws,body.mandate_id,run_id=body.run_id)
 
 
 class SoakRegistration(BaseModel):

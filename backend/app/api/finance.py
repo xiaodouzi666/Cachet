@@ -2,6 +2,7 @@ import secrets
 from decimal import Decimal
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Cookie,
     Depends,
     HTTPException,
@@ -153,6 +154,22 @@ def saved_application_check(db, run):
         },
         "verified_application_turn": None,
     }
+
+
+class PrepareWalkthrough(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/judge/prepare")
+def start_preparation(body: PrepareWalkthrough, bg: BackgroundTasks, ws=wsdep):
+    from backend.app import judge_sponsor
+    return judge_sponsor.prepare(ws,bg)
+
+
+@router.get("/judge/preparation")
+def preparation_status(ws=wsdep):
+    from backend.app import judge_sponsor
+    return judge_sponsor.status(ws)
 
 
 @router.get("/judge/state")
@@ -313,6 +330,17 @@ def capture_now(body: MandateAction, ws=wsdep):
     return service.capture(ws, body.mandate_id, force=True) or {
         "status": "below_one_cent"
     }
+
+
+class FaultCaptureRequest(MandateAction):
+    run_id: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/judge/fault-capture")
+def collect_fault_turns(body: FaultCaptureRequest, ws=wsdep):
+    with session_scope() as db:
+        throttle(db, ws, "capture")
+    return service.capture_fault_run(ws, body.mandate_id, body.run_id)
 
 
 @router.post("/judge/audit")

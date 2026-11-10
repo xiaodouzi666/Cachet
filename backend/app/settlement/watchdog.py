@@ -47,7 +47,13 @@ def end_idle_runs(now):
 
 
 def maintain():
+    from backend.app import judge_sponsor
     from backend.app.api.webhooks import retry_pending
+    with session_scope(write=False) as db:
+        pending = any(r.data["status"] not in judge_sponsor.TERMINAL
+                      for r in db.scalars(select(Control).where(Control.key.startswith(judge_sponsor.JOB))))
+    if pending:
+        judge_sponsor.kick()
 
     try:
         retry_pending()
@@ -96,7 +102,20 @@ def maintain():
         with session_scope(write=False) as db:
             if db.get(Control, key):
                 continue
+            # The guided button requests three delayed calls followed by capture and audit.
+            # A disconnected browser must not let the automatic audit waive the calls first.
+            run = db.get(AgentRun, run_id)
+            guided = db.get(Control, "judge-fault-run:" + run_id)
+            resume_capture = bool(guided and run.status == "completed" and db.get(Mandate, mandate_id).status == "ACTIVE")
+            if resume_capture:
+                measured = list(db.scalars(select(Call).where(Call.run_id == run_id)))
+                resume_capture = len(measured) == 3 and all(
+                    c.sla_breach and c.public_charge_micros > 0 and c.fault_injected_ms >= 1200 for c in measured
+                )
         try:
+            if resume_capture:
+                from backend.app.settlement.service import capture_fault_run
+                capture_fault_run(workspace_id, mandate_id, run_id)
             audit(workspace_id, mandate_id, run_id=run_id)
             with session_scope() as db:
                 db.merge(Control(key=key, data={"at": now.timestamp()}))

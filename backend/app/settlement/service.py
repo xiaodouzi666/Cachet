@@ -16,6 +16,7 @@ from backend.app.models import (
     AgentRun,
     Call,
     Capture,
+    CaptureAllocation,
     Consumer,
     Mandate,
     Refund,
@@ -290,7 +291,63 @@ def emit_receipt(db, row, kind, payload):
         db.add(RunEvent(run_id=run_id, event_type=kind, payload={**payload, "call_ids": call_ids}))
 
 
-def capture(ws, identifier, *, final=False, force=False):
+def fault_calls(db, ws, mid, rid):
+    run = owned(db, AgentRun, rid, ws)
+    marker = db.get(Control, "judge-fault-run:" + rid)
+    if not marker or marker.data.get("workspace_id") != ws or marker.data.get("mandate_id") != mid:
+        raise HTTPException(403, "This run is not the registered judge fault demonstration")
+    if run.mandate_id != mid or run.status != "completed":
+        raise HTTPException(409, "Finish the registered fault run first")
+    calls = list(db.scalars(select(Call).where(Call.run_id == rid, Call.workspace_id == ws).order_by(Call.turn)))
+    if len(calls) != 3 or any(c.fault_injected_ms <= 0 or not c.sla_breach or c.public_charge_micros <= 0 for c in calls):
+        raise HTTPException(409, "The run requires three measured, delayed public-hit SLA breaches")
+    ids = [c.id for c in calls]
+    covered = set(db.scalars(select(CaptureAllocation.call_id).join(Capture, Capture.id == CaptureAllocation.capture_id)
+                  .where(Capture.mandate_id == mid, CaptureAllocation.call_id.in_(ids), CaptureAllocation.public_micros > 0,
+                         Capture.status.in_(ledger.CAPTURED), Capture.paypal_capture_id.is_not(None))))
+    return calls, covered
+
+
+def capture_fault_run(ws, mid, rid):
+    with lock(ws):
+        with session_scope(write=False) as db:
+            owned(db, Mandate, mid, ws)
+            calls, covered = fault_calls(db, ws, mid, rid)
+            ids = [c.id for c in calls]
+        if covered != set(ids):
+            try:
+                capture(ws, mid, force=True, fault_run=rid)
+            except ledger.LedgerError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        with session_scope(write=False) as db:
+            _, covered = fault_calls(db, ws, mid, rid)
+            if covered != set(ids):
+                raise HTTPException(409, "The three measured calls do not all have a captured public allocation")
+            allocations = list(db.scalars(select(CaptureAllocation).where(CaptureAllocation.workspace_id == ws,
+                               CaptureAllocation.call_id.in_(ids), CaptureAllocation.public_micros > 0)
+                               .order_by(CaptureAllocation.call_id, CaptureAllocation.capture_id)))
+            receipts = list(db.scalars(select(Capture).join(CaptureAllocation, CaptureAllocation.capture_id == Capture.id)
+                            .where(Capture.mandate_id == mid, CaptureAllocation.call_id.in_(ids),
+                                   CaptureAllocation.public_micros > 0).distinct().order_by(Capture.created_at)))
+        verified = []
+        with PayPalClient.from_env() as pp:
+            for cap in receipts:
+                provider = pp.get_capture(cap.paypal_capture_id)
+                breakdown = provider["seller_receivable_breakdown"]
+                if (provider["id"] != cap.paypal_capture_id or provider["status"] not in ledger.CAPTURED or
+                    cents(provider["amount"]) != cap.amount_cents or cents(breakdown["paypal_fee"]) != cap.fee_cents or
+                    cents(breakdown["net_amount"]) != cap.amount_cents - cap.fee_cents):
+                    raise ValueError("PayPal GET did not confirm the fault capture")
+                verified.append({"id":cap.id, "paypal_capture_id":cap.paypal_capture_id, "amount_cents":cap.amount_cents,
+                                 "fee_cents":cap.fee_cents, "net_cents":cap.amount_cents-cap.fee_cents, "status":provider["status"]})
+        return {**(verified[0] if len(verified) == 1 else {}), "captures":verified, "target_call_ids":ids,
+                "allocations":[{"call_id":a.call_id, "capture_id":a.capture_id, "principal_micros":a.principal_micros,
+                                "public_micros":a.public_micros} for a in allocations]}
+
+
+def capture(ws, identifier, *, final=False, force=False, fault_run=None):
+    if fault_run and (final or not force):
+        raise ValueError("A targeted capture must be an explicit partial test capture")
     with lock(ws), PayPalClient.from_env() as pp:
         with session_scope() as db:
             m = owned(db, Mandate, identifier, ws)
@@ -304,31 +361,28 @@ def capture(ws, identifier, *, final=False, force=False):
                 )
             )
             if old:
+                if fault_run and old.payload.get("fault_run") != fault_run:
+                    raise HTTPException(409, "A different capture must finish before the fault capture")
                 op = old
                 amount = op.payload["amount"]
                 final = op.payload["final"]
             else:
-                plan = plan_capture(
-                    m.accrued_uncaptured_micros,
-                    m.cap_micros - m.captured_micros,
-                    capture_threshold(),
-                    final_min_micros=final_minimum(),
-                    final=final,
-                    force=force,
-                    allow_partial=value("PAYPAL_CAPTURE_POLICY", "partial")
-                    == "partial",
-                )
-                amount = plan.amount_cents
-                if not amount:
-                    return None
-                op = prepare(
-                    db,
-                    ws,
-                    "capture",
-                    m.id,
-                    {"amount": amount, "final": final},
-                    m.captured_micros,
-                )
+                if fault_run:
+                    calls, covered = fault_calls(db, ws, m.id, fault_run)
+                    shares = ledger.targeted_capture_parts(db, calls, covered)
+                    amount = sum(shares.values()) // 10000
+                    payload = {"amount":amount, "final":False, "allocations":shares, "fault_run":fault_run}
+                    key = "fault-run:" + fault_run
+                else:
+                    plan = plan_capture(m.accrued_uncaptured_micros, m.cap_micros - m.captured_micros,
+                                        capture_threshold(), final_min_micros=final_minimum(), final=final,
+                                        force=force, allow_partial=value("PAYPAL_CAPTURE_POLICY", "partial") == "partial")
+                    amount = plan.amount_cents
+                    if not amount:
+                        return None
+                    payload = {"amount":amount, "final":final}
+                    key = m.captured_micros
+                op = prepare(db, ws, "capture", m.id, payload, key)
                 if m.status == "ACTIVE":
                     transition(m, "CAPTURING")
         remote_id = call_once(
@@ -370,7 +424,7 @@ def capture(ws, identifier, *, final=False, force=False):
                     fee_cents=fee,
                     status="COMPLETED",
                 )
-                ledger.record_capture(db, row)
+                ledger.record_capture(db, row, allocations=op.payload.get("allocations"))
             if m.status == "CAPTURING":
                 transition(m, "ACTIVE")
             db.get(Operation, op.id).result = {"id": remote_id}
