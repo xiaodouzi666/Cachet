@@ -22,6 +22,9 @@ def measured_text(take):
     def segment(scene, kind):
         return data["scenes"][scene]["segments"][kind]["evidence"]
 
+    band = segment("S2", "regular")["band"]
+    if not (band["prefix_len"] == 26000 and 0 < band["warm_ttft_ms_p50"] < band["cold_ttft_ms_p50"]):
+        raise ValueError("The spoken benchmark needs the observed 26,000-token warm and cold figure.")
     ratio = segment("S3", "regular")["minimumProbeRatio"]
     q = segment("S4", "regular")["quote"]
     if (
@@ -52,6 +55,12 @@ def measured_text(take):
     def source(n):
         return (ROOT / f"video/narration/S{n}.txt").read_text().strip()
 
+    text[2] = (
+        "On this deployment a warm twenty-six-thousand-token prefix starts answering in "
+        f"{round(band['warm_ttft_ms_p50'])} milliseconds. Cold, it takes "
+        f"{band['cold_ttft_ms_p50']/1000:.1f} seconds. Cachet lets developers buy "
+        "that warm context and pays the maintainers through PayPal."
+    )
     text[3] = source(3).replace(
         "The live probe verifies the cache hits.",
         f"The live probe verifies a hit rate of at least {int(ratio*1000)/10:g} percent.",

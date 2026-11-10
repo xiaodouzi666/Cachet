@@ -43,6 +43,7 @@ async function publishLayers(
       await page.getByLabel("Parent context").selectOption(parent.id);
       await expect(page.getByLabel("Parent context")).toHaveValue(parent.id);
     }
+    await mark(slug + "-source-and-parent");
     await page
       .getByRole("button", {
         name: replay ? "Register for replay" : "Publish and warm",
@@ -138,14 +139,16 @@ async function approve(
     .toBe(true);
   await mark("sandbox-authorized");
 }
-async function selectFastAPI(page) {
+function recordingContext(contexts, { replay=false, flushedContextId } = {}) {
+  return contexts.find(c => c.can_manage && c.slug === "fastapi" &&
+    (flushedContextId ? c.id === flushedContextId : replay || c.status === "hot"));
+}
+async function selectFastAPI(page, flushedContextId) {
   const contexts = await readJson(page, "contexts");
   const replay = (await readJson(page, "health")).mode === "replay";
-  const published = contexts.find(
-    (c) => c.can_manage && c.slug === "fastapi" && (replay || c.status === "hot"),
-  );
+  const published = recordingContext(contexts,{replay,flushedContextId});
   if (!published)
-    throw Error("Publish and warm FastAPI before requesting its task quote.");
+    throw Error("The required workspace-owned FastAPI source could not be selected.");
   await page.getByLabel("Context", { exact: true }).selectOption(published.id);
 }
 async function quote(page, mark = quietMark) {
@@ -161,12 +164,17 @@ async function quote(page, mark = quietMark) {
   await mark("measured-quote");
   return measured;
 }
-async function completedTurns(page, mark = quietMark) {
-  await expect(page.locator(".table-scroller tbody tr")).toHaveCount(10, {
+async function completedTurns(page, mark = quietMark, runId) {
+  const feed=page.getByTestId("agent-run");
+  if(runId) await expect(feed).toHaveAttribute("data-run-id",runId);
+  await expect(feed.getByTestId("metered-turn")).toHaveCount(10, {
     timeout: 180000,
   });
   await expect
-    .poll(async () => (await readState(page)).run?.status, { timeout: 60000 })
+    .poll(async () => {
+      const run=(await readState(page)).run;
+      return (!runId || run?.id === runId) && run?.status;
+    }, { timeout: 60000 })
     .toBe("completed");
   await mark("ten-metered-turns");
 }
@@ -233,13 +241,6 @@ function isFaultedWarmBreach(turn, mode) {
     turn.spans_json.some((s) => s.kind === "publisher" && s.hits > 0)
   );
 }
-function meteredRow(page, turn) {
-  return page.locator(".table-scroller tbody tr").filter({
-    has: page.locator("td:first-child", {
-      hasText: new RegExp(`^${turn}(?!\\d)`),
-    }),
-  });
-}
 const scenes = {
   async S1({ page, go, mark, archiveGallery, s5 }) {
     if (archiveGallery) {
@@ -260,15 +261,19 @@ const scenes = {
     await expect(
       page.getByRole("heading", { name: "Run activity" }),
     ).toBeVisible();
-    const run = (await readState(page)).run;
+    const response=await page.request.get("/api/judge/state");
+    if(response.status()!==401 || s5) expect(response.ok()).toBe(true);
+    const workspace=response.ok()?await response.json():null;
+    const run = workspace?.run;
     if (s5) expect(run?.id).toBe(s5.runId);
     if (run) {
-      await completedTurns(page);
+      await completedTurns(page, quietMark, run.id);
       await page.locator(".prefix-stack").scrollIntoViewIfNeeded();
       await page
         .getByRole("button", { name: "Inspect measured segments" })
         .click();
       await mark("workspace-measured-prefix");
+      return {workspaceId:workspace.workspace_id,runId:run.id,mode:run.mode};
     } else {
       await page.getByText("Inspect an archived GPU turn").click();
       await expect(page.getByText("Recorded GPU trace")).toBeVisible();
@@ -289,6 +294,11 @@ const scenes = {
       page.locator(".bench-detail .bench-bar").first(),
     ).toBeVisible();
     await mark("gpu-benchmark");
+    const bands=await readJson(page,"benchmarks");
+    const measured=bands.reduce((best,band)=>band.prefix_len>best.prefix_len?band:best);
+    expect(measured.prefix_len).toBe(26000);
+    expect(measured.cold_ttft_ms_p50).toBeGreaterThan(measured.warm_ttft_ms_p50);
+    return {band:measured};
   },
   async S3({ page, go, mark, checkpoint }) {
     // Establish a fresh isolated workspace before the camera records the actual publications.
@@ -351,11 +361,14 @@ const scenes = {
     await expect(decision.locator("span")).toContainText(/buy/i);
     await decision.scrollIntoViewIfNeeded();
     await mark("live-buy-decision");
-    const rows = page.locator(".table-scroller tbody tr");
+    const rows = page.getByTestId("agent-run").getByTestId("metered-turn");
     await expect(rows.first()).toBeVisible({timeout: 120000});
     await rows.first().scrollIntoViewIfNeeded();
     await mark("first-metered-turn");
-    await completedTurns(page, mark);
+    await expect(rows.nth(3)).toBeVisible({timeout:120000});
+    await rows.nth(3).scrollIntoViewIfNeeded();
+    await mark("live-call-metering");
+    await completedTurns(page, mark, runId);
     const turns = await readRunTurns(page, runId);
     expect(turns).toHaveLength(10);
     expect(turns.every(t => t.mode === "live" && t.prompt_tokens > 0 && t.charge_micros > 0)).toBe(true);
@@ -363,7 +376,7 @@ const scenes = {
     return {workspaceId: state.workspace_id, mandateId: state.mandate.id, runId,
       calls: turns.map(t => t.id)};
   },
-  async S6({ page, go, mark, s5 }) {
+  async S6({ page, go, mark, s3, s5 }) {
     await go("/judge");
     const state = await readState(page);
     expect(state.workspace_id).toBe(s5.workspaceId);
@@ -395,7 +408,9 @@ const scenes = {
     expect(flushId).toBeTruthy();
     await mark("global-cache-flushed");
     await go("/agent");
-    await selectFastAPI(page);
+    // A confirmed global flush marks all contexts cold. Select the earlier verified
+    // source by ID so the next live generation owns the first post-flush observation.
+    await selectFastAPI(page, s3.fastapiId);
     const [started] = await Promise.all([
       page.waitForResponse(r=>r.request().method()==="POST" && new URL(r.url()).pathname==="/api/agent/runs"),
       page.getByRole("button",{name:"Run agent",exact:true}).click(),
@@ -404,14 +419,25 @@ const scenes = {
     const {run_id:coldRun}=await started.json();
     const [cold]=await readRunTurns(page,coldRun,flushId);
     expect(isColdAndFree(cold,flushId)).toBe(true);
-    const coldRow=meteredRow(page,cold.turn);
+    const coldRow=page.getByTestId("metered-turn").filter({has:page.getByText("Cold · free public prefix",{exact:true})});
+    await expect(coldRow).toHaveAttribute("data-call-id",cold.id);
     await expect(coldRow).toContainText("Cold · free public prefix");
     await coldRow.scrollIntoViewIfNeeded();
     await mark("cold-free-public-prefix");
-    await completedTurns(page);
+    await completedTurns(page, quietMark, coldRun);
     await go("/judge");
     await step(5).click();
-    await page.getByRole("button",{name:"Inject three delays, capture and audit (test)",exact:true}).click();
+    const postTo = route => response => response.request().method()==="POST" && new URL(response.url()).pathname===route;
+    const auditObserved = page.waitForResponse(postTo("/api/judge/fault-audit"),{timeout:240000}).catch(()=>null);
+    const [faultStart] = await Promise.all([
+      page.waitForResponse(postTo("/api/judge/fault-run")),
+      page.getByRole("button",{name:"Inject three delays, capture and audit (test)",exact:true}).click(),
+    ]);
+    expect(faultStart.ok()).toBe(true);
+    await mark("three-delays-submitted");
+    const auditReply=await auditObserved;
+    expect(auditReply?.ok()).toBe(true);
+    await mark("live-fault-audit");
     await expect(step(5)).toHaveAttribute("data-complete","true",{timeout:240000});
     const guide=await readJson(page,"judge/walkthrough");
     expect(guide.followup.mandate_id).toBe(s5.mandateId);
@@ -445,7 +471,7 @@ async function main() {
   return runRecorder({scenes, chromium, expect, readState, readJson}, process.argv.slice(2));
 }
 module.exports = { scenes, main, readState, publishLayers, approve, quote, completedTurns,
-  isColdAndFree, isFaultedWarmBreach };
+  isColdAndFree, isFaultedWarmBreach, recordingContext };
 if (require.main === module) main().catch(error => {
   console.error(String(error.message).split("Call log:")[0]);
   process.exitCode = 1;

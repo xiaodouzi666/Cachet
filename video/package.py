@@ -137,6 +137,9 @@ def verify_pair(takes):
         approval = evidence("S4", "regular")
         task = evidence("S5", "regular")
         ordinary = evidence("S6", "regular")
+        prefix = evidence("S1", "regular")
+        if prefix.get("runId") != task["runId"] or prefix.get("workspaceId") != task["workspaceId"] or prefix.get("mode") != "live":
+            raise ValueError("S1 must show the completed ten-turn live run from the same camera's S5")
         cleanup = t["regular_wallet_cleanup"]
         if not (
             publish["workspaceId"] == task["workspaceId"] == ordinary["workspaceId"]
