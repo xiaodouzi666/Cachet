@@ -3,6 +3,16 @@ import os
 import pytest
 
 from backend.app.gateway.sglang_client import Engine, settings
+from scripts.gpu_lease import gpu_lease
+
+
+@pytest.fixture(autouse=True)
+def serialize_physical_gpu_checks(request):
+    if request.node.get_closest_marker("gpu"):
+        with gpu_lease():
+            yield
+    else:
+        yield
 
 
 @pytest.fixture

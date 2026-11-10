@@ -2,8 +2,6 @@
 
 import argparse
 import json
-import fcntl
-from contextlib import contextmanager
 import os
 import time
 from decimal import Decimal
@@ -13,6 +11,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from sandbox_smoke import ROOT, PayPalClient, approve_wallet, check, locked_journal, now, require, settings
+
+from scripts.gpu_lease import gpu_lease
 
 SOURCES = ("starlette", "fastapi")
 # Preparation earns real publisher balances with short, read-only framework tasks.
@@ -49,15 +49,6 @@ def save_report(path, data):
         handle.flush()
         os.fsync(handle.fileno())
     tmp.replace(path)
-
-
-@contextmanager
-def gpu_lease():
-    path = Path(os.environ.get("CACHET_GPU_LEASE") or ROOT / ".cache" / "night-gpu.lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
 
 
 class Demo:
