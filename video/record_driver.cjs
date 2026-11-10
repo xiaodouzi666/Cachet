@@ -215,7 +215,8 @@ async function runRecorder(api,args) {
               const failedScene=regularOrder.find(n=>["incomplete","recording"].includes(c.data.segments[n+"-regular"]?.status));
               faults.push(failedScene==="S4"?"S4 wallet approval is incomplete. Inspect the isolated camera's private journal and release readback.":String(e.message).split("Call log:")[0]);
             } finally {
-              if(failed||c.data.segments["S6-regular"]?.status==="captured") {
+              if(failed||c.data.segments["S6-regular"]?.status==="captured" ||
+                  (ordered.includes("S4") && !ordered.includes("S6"))) {
                 try { await cleanup(c,browser,api); } catch(e) { failed=true; faults.push(e.message); }
               }
             }
@@ -257,8 +258,14 @@ async function runRecorder(api,args) {
         }
       } finally {await browser.close();}
     }
-    for(const c of cameras) await exec(process.env.CACHET_PYTHON||"python3",[path.join(__dirname,"compose_take.py"),c.dir,
-      path.join(session,"take-"+c.data.camera),"--scenes",opts.names.join(",")],{cwd:root,maxBuffer:1048576});
+    for(const c of cameras){
+      const dest=path.join(session,"take-"+c.data.camera);
+      await exec(process.env.CACHET_PYTHON||"python3",[path.join(__dirname,"compose_take.py"),c.dir,
+        dest,"--scenes",opts.names.join(",")],{cwd:root,maxBuffer:1048576});
+      const cut=await read(path.join(dest,"timeline.json"));
+      const missing=opts.names.filter(name=>cut.scenes[name]?.status!=="captured");
+      if(missing.length) faults.push("Camera "+c.data.camera+" incomplete: "+missing.join(", "));
+    }
     console.log(session);
     if(faults.length)throw Error(faults.join("\n"));
   },true);
