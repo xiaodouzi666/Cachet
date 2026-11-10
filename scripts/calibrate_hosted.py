@@ -13,7 +13,7 @@ from backend.app.config import manifest
 from backend.app.gateway.hosted import LENGTHS, calibration_path, endpoint, metadata
 from backend.app.gateway.prompt_builder import Prefix, token_hash
 from backend.app.gateway.sglang_client import Engine
-from bench.calibrate import fit
+from backend.app.gateway.calibration import fit
 from bench.ttft_bench import benchmark
 
 
