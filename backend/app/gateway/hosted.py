@@ -97,7 +97,7 @@ def fingerprint(profile):
 
 
 def read_profile():
-    from bench.calibrate import fit
+    from backend.app.gateway.calibration import fit
 
     profile = json.loads(calibration_path().read_bytes())
     pin = manifest()["tokenizer"]
