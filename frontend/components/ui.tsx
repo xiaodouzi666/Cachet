@@ -245,7 +245,7 @@ export function MoneyStrip({ mandate }: { mandate: Mandate | null }) {
         ["Forgiven", mandate?.forgiven_micros],
         ["Released authorization", mandate?.released_micros],
       ].map(([label, value]) => (
-        <div key={label}>
+        <div key={label} data-testid={"money-" + String(label).toLowerCase().split(" ").at(0)}>
           <small>{label}</small>
           <Money value={typeof value === "number" ? value : undefined} />
         </div>

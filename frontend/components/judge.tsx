@@ -313,6 +313,9 @@ export function Judge() {
             </li>
           ))}
         </ol>
+        {isJudge && <button className="text-button" onClick={async () => {
+          await session.start("user", true); displayStep(0);
+        }}>Exit judge mode</button>}
       </aside>
       <div className="guide-content stack">
         <div>
@@ -342,7 +345,10 @@ export function Judge() {
                 : "Start guided demo"}{" "}
               <ArrowRight size={16} />
             </button>
-            {data?.contexts.map((c) => (
+            {!data?.preparation || data.preparation.status === "not_started" ? <p className="help">
+            Starting prepares two maintainer payouts with a separate operator-funded sandbox authorization of up to $1.
+          </p> : null}
+          {data?.contexts.map((c) => (
               <div className="guide-source" key={c.id}>
                 <strong>{c.slug}</strong>
                 <Tag tone={c.status === "hot" ? "good" : "neutral"}>
@@ -557,7 +563,7 @@ export function Judge() {
             </p>
             <button
               className="secondary"
-              disabled={!!busy}
+              disabled={!!busy || session.mode !== "live"}
               onClick={() => {
                 if (!confirmFlush) {
                   setConfirmFlush(true);
