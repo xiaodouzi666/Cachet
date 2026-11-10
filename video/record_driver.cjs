@@ -101,6 +101,20 @@ async function cleanup(camera,browser,api) {
     await camera.save();
   } finally { await ctx.close(); }
 }
+async function waitForSponsor(camera,browser,api) {
+  if(!camera.data.workspaceId || !camera.data.segments["S3-regular"]) return;
+  const saved=await read(path.join(camera.dir,"storage.json"),null);
+  if(!saved) return;
+  const ctx=await browser.newContext({baseURL:camera.data.origin,storageState:saved});
+  try {
+    const p=await ctx.newPage();
+    assert((await api.readState(p)).workspace_id===camera.data.workspaceId,"Cannot inspect another workspace's guide preparation.");
+    await api.expect.poll(async()=>{
+      const guide=await api.readJson(p,"judge/walkthrough");
+      return ["not_started","ready","exhausted","failed"].includes(guide.preparation.status);
+    },{timeout:20*60*1000,intervals:[2000,5000,10000],message:"Waiting for this camera's GPU sponsor to finish before releasing its lease"}).toBe(true);
+  } finally { await ctx.close(); }
+}
 async function recordNormal(camera,scene,browser,api,opts) {
   const m=camera.data, key=scene+"-regular", old=m.segments[key];
   if(old?.status==="captured") return;
@@ -229,7 +243,10 @@ async function runRecorder(api,args) {
           if(usesGpu){
             const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
             const lock=process.env.CACHET_GPU_LOCK||path.join(path.dirname(common),".cache/night-gpu.lock");
-            failed=await fileLock(lock,runCamera);
+            failed=await fileLock(lock,async()=>{
+              try { return await runCamera(); }
+              finally { await waitForSponsor(c,browser,api); }
+            });
           } else failed=await runCamera();
           if(failed&&!opts.allowPartial) break;
         }
