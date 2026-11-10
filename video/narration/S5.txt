@@ -1,1 +1,1 @@
-Each turn sends exact token IDs to the inference engine. The returned hit count determines which shared tokens earn royalties. Private input and generated output have separate rates. Cachet accrues microdollars and requests captures in whole cents against the approved budget.
+Each turn shows the tokens the engine actually found in cache, its first-token latency, and its charge. On this separate long-running mandate, small charges accumulate into two-dollar captures. The settlement table shows the provider fee and net proceeds for each capture.

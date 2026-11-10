@@ -1,1 +1,1 @@
-A cold shared token costs the buyer nothing. The judge can inject a real delay to test the latency guarantee. The audit reverses uncaptured charges, or requests a PayPal refund for captured charges. Closing the mandate releases the remaining authorization.
+Cold shared tokens cost nothing. The judge injects delays and audits the affected warm calls. PayPal confirms the refund. Closing the long-running mandate resolves its final balance and releases the unused authorization.

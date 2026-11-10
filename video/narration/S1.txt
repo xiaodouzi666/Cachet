@@ -1,1 +1,1 @@
-Coding agents repeatedly read the same open-source code. Each new session can pay to process thousands of tokens again. The maintainers who wrote that code earn nothing from those reads.
+Every AI coding agent re-reads the same open-source code. Session after session, it pays to recompute tens of thousands of tokens. The maintainers who wrote that code get nothing.

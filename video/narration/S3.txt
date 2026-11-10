@@ -1,1 +1,1 @@
-A publisher selects licensed Starlette source, then adds FastAPI as its child layer. Cachet checks the source and token hashes. A second request probes the warm prefix. The catalog shows the hit rate that the engine actually returned.
+A maintainer publishes Starlette, then layers FastAPI on top. Cachet tokenizes each layer and warms it on the GPU. The live probe verifies the cache hits. Royalties go to each maintainer's PayPal sandbox account.

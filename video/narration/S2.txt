@@ -1,1 +1,1 @@
-On our R T X thirty ninety T I, a cold twenty-six-thousand-token prefix took eight point four seconds to produce its first text. Warm, it took sixty-nine milliseconds. Those are medians from five paired runs.
+On our R T X thirty ninety T I, a warm twenty-six-thousand-token prefix starts answering in sixty-nine milliseconds. Cold, it takes eight point four seconds. Cachet lets developers buy that warm context and pays the maintainers through PayPal.

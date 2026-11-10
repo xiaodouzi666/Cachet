@@ -1,1 +1,1 @@
-The settlement screen follows royalties from each layer to the corresponding payout item. Starlette matters because FastAPI's cached prefix depends on it. Switch between token counts and Shapley attribution to see the effect. The operations copilot reads workspace evidence, and a refund proposal requires confirmation.
+Royalties go out in one PayPal Payouts batch. FastAPI's cache depends on Starlette, so Shapley attribution assigns the foundation its share. The ledger reconciles against PayPal, and the operations copilot uses PayPal's Agent Toolkit to explain the payment.

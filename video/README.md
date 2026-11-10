@@ -1,30 +1,39 @@
-# Record and edit the demo
+# Record and package the demo
 
-The recorder captures the running Cachet UI at 1920×1080. Each scene waits for observable browser or API events and writes a WebM, evidence PNGs and a timestamped timeline under `video/out/`. Production recordings require the HTTPS judge site and working sandbox accounts. A rehearsal can use the loopback deployment.
+The recorder makes two 1920×1080 takes. Each ordinary walkthrough publishes its own Starlette → FastAPI chain in a fresh judge workspace, authorizes one $5 PayPal sandbox wallet, and keeps that workspace through S5’s ten live turns, the S1 Prefix Stack, the S6 cold call and the three fault refunds. It releases that original wallet and checks the order, authorization, captures and refunds against PayPal. S5 also shows the marked recording mandate’s threshold captures. S6 and S7 use two simultaneous pages observing one soak authorization and one payout batch. [Soak camera and receipt contract](soak-filming.md)
 
-From the repository root:
+Supply the origin, provider readback interpreter, and existing private journal through the operator environment. The FFmpeg/FFprobe on PATH must support VP9. On the recording server the installed binaries are under `~/anaconda3/envs/devpost/bin`. Set `PLAYWRIGHT_CHROMIUM_CHANNEL=chromium-headless-shell` for its installed Playwright browser.
+
+## C7 rehearsal
+
+Set `PUBLIC_WEB_URL`, `PUBLIC_API_URL`, and `CACHET_SOAK_JOURNAL` to the production bindings. Set `CACHET_REHEARSAL_WEB_URL`, `CACHET_REHEARSAL_API_URL`, and `CACHET_SOAK_REHEARSAL_JOURNAL` to the separate rehearsal deployment and its funded recording mandate. The journal is a private mode-0600 file. A complete rehearsal needs both real threshold captures and the linked refund. An isolated rehearsal includes real sandbox close and settlement on its own authorized mandate.
 
 ```sh
-npm ci --prefix frontend
-(cd frontend && npx playwright install chromium)
-CACHET_WEB_URL=http://127.0.0.1:3000 node video/record_scenes.ts S1,S2,S8 --rehearsal
+export CACHET_WEB_URL="$CACHET_REHEARSAL_WEB_URL"
+node video/record_scenes.ts --rehearsal --isolated-rehearsal-actions --session video/out/rehearsals/c7
+python video/tts.py --models .cache/kokoro --from-take video/out/rehearsals/c7/take-1 --output video/out/rehearsals/c7/voice
+python video/package.py video/out/rehearsals/c7/take-1 video/out/rehearsals/c7/take-2 --rehearsal --narration video/out/rehearsals/c7/voice --output video/out/rehearsals/c7/handoff
 ```
 
-S1 identifies the historical GPU trace used in its Prefix Stack. S2 shows the measured five-band benchmark. S8 shows the architecture and provider APIs. S3–S7 require actual receiver configuration, buyer authorization, real metering and provider readbacks. The fresh publishing workspace and the accumulated payout workspace serve different scenes. Set `CACHET_S7_SEED_JOURNAL` to the operator's private seed journal under `logs/` for the funded payout scene. Use the recorder's screenshots and marked event times to inspect the result before editing.
+Run TTS using the existing Python environment with Kokoro ONNX and soundfile. It emits eight mono 24 kHz WAVs, the spoken texts, hashes and durations. The measured variant reads the recorded probe ratio, Buy quote, actual capture fees and authorization release. The duration limit is 110% of each Appendix B scene target. Omitting `--from-take` generates the generic rehearsal narration.
 
-## English voiceover
+For a read-only subset, use e.g. `node video/record_scenes.ts S2,S8 --rehearsal --session video/out/rehearsals/visuals`. S1 also retains the `--archive-gallery` rehearsal option.
 
-Install `kokoro-onnx==0.5.0` and `soundfile` in a separate Python 3.11 environment. Download `kokoro-v1.0.onnx` and `voices-v1.0.bin` from the upstream release into `.cache/kokoro/`. The checked recording used voice `af_heart` and the following SHA-256 hashes. [ONNX release](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0) · [Kokoro-82M model and license](https://huggingface.co/hexgrad/Kokoro-82M)
+## D1 recording and D2 handoff
 
-| File | SHA-256 |
-|---|---|
-| kokoro-v1.0.onnx | `7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5` |
-| voices-v1.0.bin | `bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d` |
+```sh
+export CACHET_WEB_URL="$PUBLIC_WEB_URL"
+node video/record_scenes.ts --session video/out/takes/d1
+python video/tts.py --models .cache/kokoro --from-take video/out/takes/d1/take-1 --output video/out/takes/d1/voice
+python video/package.py video/out/takes/d1/take-1 video/out/takes/d1/take-2 --narration video/out/takes/d1/voice --output video/out/video_raw_1112
+```
 
-Run `python video/tts.py` inside that environment. The program writes eight mono 24 kHz WAVs and `durations.json` containing the source hashes, waveform hashes and measured durations. Regenerate audio after changing the corresponding narration text.
+Each regular S6 takes the recording server’s shared `.cache/night-gpu.lock` before flushing and honors the service’s cooldown. For worktrees the default lock is next to the primary checkout’s Git directory. Run the recorder directly to allow it to acquire and release this lock. A non-default installation can set `CACHET_GPU_LOCK`.
 
-## Production takes and handoff
+The original source videos, stills, timestamps, cookie state, camera manifests and paired receipts stay under the session’s private directory. Keep the separate soak journal and its action sidecars on the operator host. Rerun with the **same session** to skip complete segments. If a wallet scene is interrupted, its available camera footage is retained and the recorder attempts release of that workspace’s original authorization. `--cleanup --session ...` retries only the regular wallets’ release and provider readback. Keep the original production/rehearsal flag. An interrupted, unfilmed payment is reported as incomplete. A resumed readback may document its outcome.
 
-Export `CACHET_WEB_URL` with the real HTTPS deployment origin. Run `node video/record_scenes.ts` twice. Each run prints its take directory. With FFmpeg and FFprobe on the path, run `python video/package.py FIRST_TAKE SECOND_TAKE --output video/out/video_raw_1112`, substituting the two actual directories. The output directory contains both 1080p takes, key frames, a combined timeline, 24 kHz narration, the benchmark plot, and the GPU buy/compute comparison. The 300 MB limit applies to the uncompressed files.
+`--compose-only --session ...` rebuilds the edited takes entirely from the saved material. FFmpeg removes intervals between observed UI milestones, inserts the masked real PayPal popup PNG into S4, and appends each camera’s own soak segment to S5/S6. Milestone times refer to the edited media clock. Each event retains its source time and screenshot hash. The packager decodes the frame at each milestone and checks it against the PNG, verifies two independent wallet sessions and both original recorded soak submissions, and enforces the 300 MB uncompressed limit. The directory and zip outputs include the two takes, 1080p PNGs, voice WAVs, timeline, benchmark plots and measured contrast. Use `--contrast PATH` when the genuine contrast report resides in a separate benchmark checkout.
 
-Use `python video/edit.py TAKE --output video/out/cachet.mp4` for a first cut from a completed production take, or add `--preview` for a rehearsal. The edit carries selectable English captions, AAC audio and a 1080p H.264 stream. The final video and the public upload still need review against the live product and the event rules.
+For an explicitly incomplete handoff, use `--allow-partial` while recording and `--partial` while packaging. Recording errors still return a failure exit status. The top-level timeline lists missing scenes by camera and any failed pair validation. A complete D1/D2 handoff requires the fully validated package. Copy **only the verified handoff directory** to the editing Mac at `~/Documents/Codex/video_raw_1112/`.
+
+The optional first-cut editor accepts `python video/edit.py TAKE --output video/out/cachet.mp4`; use `--preview` for a rehearsal.
