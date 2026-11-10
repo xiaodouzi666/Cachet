@@ -6,9 +6,9 @@ import time
 from decimal import Decimal, ROUND_CEILING
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
-from backend.app import ledger, marketplace
+from backend.app import ledger, marketplace, soak
 from backend.app.agents.anomaly import payer_key, same_payer_layers
 from backend.app.agents.inference import live_turns
 from backend.app.agents.quote_reason import generate_reason, recorded_reason
@@ -97,10 +97,14 @@ def replay_turns(track, owners, fault_source):
         )
 
 
-def next_fault(ws):
+def next_fault(ws, run_id=None):
     with session_scope() as db:
+        if run_id:
+            run = owned(db, AgentRun, run_id, ws)
+            if run.quote_json.get("operator_soak"):
+                return soak.next_delay(db, ws, run)
         control = db.get(Control, "fault:" + ws)
-        if control and control.data["remaining"] > 0:
+        if control and control.data["remaining"] > 0 and control.data.get("run_id") in (None, run_id):
             control.data = {**control.data, "remaining": control.data["remaining"] - 1}
             return control.data["ms"]
         return 0
@@ -308,7 +312,7 @@ def execute(ws, identifier, context_id, tenant):
                         task,
                         buy,
                         builtin_task=task_id in TASKS,
-                        fault_source=lambda: next_fault(ws),
+                        fault_source=lambda: next_fault(ws, identifier),
                         pending_flush=(
                             (lambda: pending_flush_id(ws))
                             if mode == "live" and buy
@@ -320,7 +324,7 @@ def execute(ws, identifier, context_id, tenant):
                         task_id, buy, source_chain=source_chain, request_quote=config
                     )
                     explanation = recorded_reason(checked_track["quote"])
-                    turns = replay_turns(checked_track, owners, lambda: next_fault(ws))
+                    turns = replay_turns(checked_track, owners, lambda: next_fault(ws, identifier))
                 with session_scope() as db:
                     emit(
                         db,
@@ -402,6 +406,10 @@ def tasks():
 
 @router.post("/agent/runs")
 def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
+    return start_run(body, bg, request, ws)
+
+
+def start_run(body, bg, request, ws, *, soak_sequence=None):
     serving = health()
     mode = serving["mode"]
     profile = calibration(mode)
@@ -409,6 +417,13 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
         raise HTTPException(503, "Inference is unavailable")
     with session_scope() as db:
         m = owned(db, Mandate, body.mandate_id, ws)
+        soak_marker = None
+        if soak_sequence is not None:
+            soak_marker, previous = soak.admit(db, ws, m.id, soak_sequence)
+            if previous:
+                return previous
+            if mode != "live" or body.context_id != soak_marker.data["context_id"] or body.task_id != "rate-limit" or body.task_text:
+                raise HTTPException(409, "Operator soak requires the registered live built-in task")
         ctx = marketplace.visible_context(db, body.context_id, ws)
         if m.status != "ACTIVE" or not m.authorization_id:
             raise HTTPException(409, "A sandbox-authorized mandate is required")
@@ -432,13 +447,11 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
             raise HTTPException(
                 422, "Select a built-in task for this context or supply a custom task"
             )
-        limit(db, ["runs:" + ws], 3, 3600)
-        limit(
-            db,
-            ["runs-ip:" + client_ip(request)],
-            int(value("RUNS_PER_IP_HOUR", "20")),
-            3600,
-        )
+        if soak_marker is None:
+            limit(db, ["runs:" + ws], 3, 3600)
+            limit(db, ["runs-ip:" + client_ip(request)], int(value("RUNS_PER_IP_HOUR", "20")), 3600)
+        else:
+            limit(db, ["operator-soak:" + m.id], 240, 3600)
         layers = chain(db, ctx)
         q = quote(
             sum(c.token_len for c in layers), len(STEPS), body.cold_fraction, profile
@@ -473,6 +486,10 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
         )
         db.add(r)
         db.flush()
+        if soak_marker:
+            data = soak_marker.data
+            soak_marker.data = {**data, "sequence":soak_sequence, "last_run_id":r.id}
+            r.quote_json = {**r.quote_json, "operator_soak":True}
         position = db.scalar(
             select(func.count())
             .select_from(AgentRun)
@@ -481,6 +498,63 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
         emit(db, r.id, "queued", {"position": position, "mode": mode})
         bg.add_task(execute, ws, r.id, ctx.id, db.get(Consumer, m.consumer_id).salt_hex)
         return {"run_id": r.id, "status": r.status}
+
+
+class SoakRegistration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mandate_id: str
+    context_id: str
+
+
+class SoakStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sequence: int = Field(ge=1, le=soak.RUN_BUDGET)
+
+
+SOAK_AUTH = [Depends(soak.operator_token)]
+
+
+@router.get("/operator/soak-registration", dependencies=SOAK_AUTH)
+def registered_soak():
+    with session_scope(write=False) as db:
+        marker = db.get(Control, soak.REGISTRATION)
+        return {"workspace_id": marker.data["workspace_id"] if marker else None,
+                "mandate_id": marker.data["mandate_id"] if marker else None}
+
+
+@router.post("/operator/soak/claim/{context_id}", dependencies=SOAK_AUTH)
+def claim_soak(context_id: str, ws=wsdep):
+    with session_scope() as db:
+        marker = soak.claim(db, ws, context_id)
+        return {"workspace_id": ws, "context_id": marker.data["context_id"]}
+
+
+@router.post("/operator/soak/reserve", dependencies=SOAK_AUTH)
+def reserve_soak(body: SoakRegistration, ws=wsdep):
+    with session_scope() as db:
+        soak.register(db, ws, body.mandate_id, body.context_id)
+        db.flush()
+        return soak.state(db, ws, body.mandate_id)
+
+
+@router.get("/operator/soak/{mid}", dependencies=SOAK_AUTH)
+def soak_status(mid: str, ws=wsdep):
+    with session_scope(write=False) as db:
+        return soak.state(db, ws, mid)
+
+
+@router.post("/operator/soak/{mid}/continue/{window}", dependencies=SOAK_AUTH)
+def continue_soak(mid: str, window: int, ws=wsdep):
+    with session_scope() as db:
+        return soak.extend(db, ws, mid, window)
+
+
+@router.post("/operator/soak/{mid}/runs", dependencies=SOAK_AUTH)
+def start_soak(mid: str, body: SoakStep, bg: BackgroundTasks, request: Request, ws=wsdep):
+    with session_scope(write=False) as db:
+        ctx = soak.registered(db, ws, mid).data["context_id"]
+    return start_run(Start(mandate_id=mid, context_id=ctx, task_id="rate-limit"), bg, request, ws,
+                     soak_sequence=body.sequence)
 
 
 def frame(kind, data, identifier=None):

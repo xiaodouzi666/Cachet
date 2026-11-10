@@ -171,16 +171,20 @@ def state(ws=wsdep):
         sandbox = value("PAYPAL_ENV", "sandbox") == "sandbox"
         buyer = sandbox and kind == "judge"
         provenance = seed.seed_state(db, ws)
+        registration = db.get(Control, "operator-soak-registration")
+        soak_mandate = registration.data["mandate_id"] if registration and registration.data.get("workspace_id") == ws else None
         latest_run = (
             fields(run, "id mandate_id task_id status mode quote_json") if run else None
         )
         if latest_run:
             latest_run.update(saved_application_check(db, run))
+            latest_run["operator_soak"] = bool(run.quote_json.get("operator_soak"))
             latest_run["operator_seeded"] = (
                 run.id in provenance["operator_seed_run_ids"]
             )
         return {
             **provenance,
+            "operator_soak_mandate_id": soak_mandate,
             "workspace_id": ws,
             "kind": kind,
             "mandate": service.view(m) if m else None,

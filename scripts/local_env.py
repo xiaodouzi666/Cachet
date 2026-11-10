@@ -18,9 +18,6 @@ def main():
     try:
         fcntl.flock(directory, fcntl.LOCK_EX)
         if target.exists():
-            if dotenv_values(target).get("ADMIN_TOKEN"):
-                print("Using the existing project .env.")
-                return
             content = target.read_text()
         else:
             content = (
@@ -31,14 +28,23 @@ def main():
                     "DATABASE_URL=sqlite:///./.data/cachet.db",
                 )
             )
-        setting = "ADMIN_TOKEN=" + secrets.token_urlsafe(32)
-        pattern = re.compile(
-            r"^[ \t]*(?:export[ \t]+)?ADMIN_TOKEN[ \t]*=.*$", re.MULTILINE
-        )
-        if pattern.search(content):
-            content = pattern.sub(setting, content)
-        else:
-            content = content.rstrip("\n") + "\n" + setting + "\n"
+        existing = dotenv_values(target) if target.exists() else {}
+        changed = False
+        for key in ("ADMIN_TOKEN", "CACHET_SOAK_TOKEN"):
+            if key == "ADMIN_TOKEN" and existing.get(key):
+                continue
+            if key == "CACHET_SOAK_TOKEN" and len(existing.get(key) or "") >= 32 and existing[key] != existing.get("ADMIN_TOKEN"):
+                continue
+            setting = key + "=" + secrets.token_urlsafe(48)
+            pattern = re.compile(r"^[ \t]*(?:export[ \t]+)?" + key + r"[ \t]*=.*$", re.MULTILINE)
+            if pattern.search(content):
+                content = pattern.sub(setting, content)
+            else:
+                content = content.rstrip("\n") + "\n" + setting + "\n"
+            changed = True
+        if not changed:
+            print("Using the existing project .env.")
+            return
         with tempfile.NamedTemporaryFile(
             mode="w", dir=ROOT, delete=False, prefix=".env."
         ) as handle:
@@ -50,7 +56,7 @@ def main():
                 staged.replace(target)
             finally:
                 staged.unlink(missing_ok=True)
-        print("Configured the private development gateway token in .env.")
+        print("Configured the private gateway and operator credentials in .env.")
     finally:
         os.close(directory)
 
