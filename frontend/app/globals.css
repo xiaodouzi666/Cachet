@@ -1480,3 +1480,8 @@ td {
   .money-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .money-strip > div:last-child { grid-column: 1 / -1; }
 }
+
+
+.recording, .recording button, .recording a { cursor: none; }
+.recording .recording-pulse { animation-duration: 460ms; }
+.recording .skeleton { animation-duration: 1200ms; }

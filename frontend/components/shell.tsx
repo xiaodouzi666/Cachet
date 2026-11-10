@@ -69,6 +69,8 @@ export function RecordingMode() {
     document.documentElement.classList.add("recording");
     const cursor = document.createElement("span");
     cursor.className = "recording-cursor";
+    cursor.setAttribute("aria-hidden", "true");
+    cursor.dataset.testid = "recording-cursor";
     cursor.hidden = true;
     document.body.appendChild(cursor);
     const move = (e: PointerEvent) => {
@@ -78,6 +80,8 @@ export function RecordingMode() {
     const click = (e: PointerEvent) => {
       const pulse = document.createElement("span");
       pulse.className = "recording-pulse";
+      pulse.setAttribute("aria-hidden", "true");
+      pulse.dataset.testid = "recording-click";
       pulse.style.left = e.clientX + "px";
       pulse.style.top = e.clientY + "px";
       document.body.appendChild(pulse);
