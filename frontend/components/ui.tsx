@@ -4,7 +4,7 @@ import { AlertCircle, ArrowRight, CircleDashed, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { count, usd } from "../lib/client";
-import type { Mandate, Span } from "../lib/types";
+import type { Health, Mandate, Span } from "../lib/types";
 
 export function PageTitle({
   title,
@@ -245,11 +245,41 @@ export function MoneyStrip({ mandate }: { mandate: Mandate | null }) {
         ["Forgiven", mandate?.forgiven_micros],
         ["Released authorization", mandate?.released_micros],
       ].map(([label, value]) => (
-        <div key={label}>
+        <div key={label} data-testid={"money-" + String(label).toLowerCase().split(" ").at(0)}>
           <small>{label}</small>
           <Money value={typeof value === "number" ? value : undefined} />
         </div>
       ))}
     </div>
   );
+}
+
+export function ModeBadge({ health, error }: { health: Health | null; error: string }) {
+  const name = health?.mode;
+  const label =
+    name === "live"
+      ? `Live · self-hosted SGLang${health?.gpu ? " ("+health.gpu.replace(/^NVIDIA (?:GeForce )?/, "")+")" : ""}`
+      : name === "hosted"
+        ? "Live · hosted cache fallback"
+        : name === "replay"
+          ? "Replay of recorded GPU session"
+          : name === "unavailable" || error
+            ? "Inference offline"
+            : "Checking inference";
+  return (
+    <span
+      className={`mode-dot ${name === "live" || name === "hosted" ? "online" : ""}`}
+      title={health?.gpu || health?.model || error || label}
+    >
+      {label}
+    </span>
+  );
+}
+export function FeeHint({amountCents, feeCents, actual = false}: {
+  amountCents?: number; feeCents?: number; actual?: boolean;
+}) {
+  if (amountCents === undefined || feeCents === undefined) return <small className="help">No capture estimate yet.</small>;
+  return <p className="help" data-testid="fee-hint">
+    {actual ? "Collected" : "Estimated collection"} {usd(amountCents*10_000,2)} · {actual ? "actual fee" : "estimated fee"} {usd(feeCents*10_000,2)} · net {usd((amountCents-feeCents)*10_000,2)}
+  </p>;
 }

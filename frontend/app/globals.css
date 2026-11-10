@@ -4,8 +4,9 @@
   --paper: #f7f7f5;
   --white: #fff;
   --ink: #111827;
-  --muted: #626e75;
-  --line: #dce2df;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --cold: #94a3b8;
   --accent: #0f766e;
   --teal-dark: #0c4c46;
   --light: #ebf6f2;
@@ -184,7 +185,7 @@ summary:focus-visible {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: var(--cold);
 }
 .mode-dot.online:before {
   background: #32876b;
@@ -1345,7 +1346,7 @@ td {
   border-radius: 2px;
 }
 .bench-bar.cold {
-  background: #94a3b8;
+  background: var(--cold);
 }
 .bench-bar.warm {
   background: var(--accent);
@@ -1485,3 +1486,8 @@ td {
   .money-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .money-strip > div:last-child { grid-column: 1 / -1; }
 }
+
+
+.recording, .recording button, .recording a { cursor: none; }
+.recording .recording-pulse { animation-duration: 460ms; }
+.recording .skeleton { animation-duration: 1200ms; }

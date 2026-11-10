@@ -43,36 +43,21 @@ test("uses the real API through isolated browser workspaces and the settlement d
     ).toBeDisabled();
   }
   await page.getByRole("link", { name: "Judge mode", exact: true }).click();
-  await page.getByRole("button", { name: "Start guided demo" }).click();
-  await expect(page.getByText("Workspace open")).toBeVisible();
+  // This nonfinancial surface check creates the isolated browser workspace only.
+  // The paid six-step test separately clicks Start guided demo and verifies sponsor funding.
+  expect((await page.request.post("/api/judge/workspace", { data: { kind: "judge" } })).ok()).toBe(true);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Start guided demo" })).toBeVisible();
   const isolated = await state();
   expect(isolated.kind).toBe("judge");
   expect(isolated.workspace_id).not.toBe(original.workspace_id);
-  await expect(
-    page.getByRole("button", { name: /Exercise the controls/ }),
-  ).toBeEnabled();
-  if (health.mode === "replay") {
-    await page.getByRole("button", { name: /Publish the layers/ }).click();
-    await expect(
-      page.getByRole("heading", { name: "Recorded workload" }),
-    ).toBeVisible();
-    await expect(
-      page.getByText(/Live warming and hit probes are unavailable/),
-    ).toBeVisible();
-    // The fresh judge must register both licensed layers before proceeding.
-    await expect(
-      page.getByRole("button", { name: "Continue to authorization" }),
-    ).toHaveCount(0);
-    await expect(page.getByLabel("PayPal receiver email")).toHaveValue("");
-  }
-  await page.getByRole("button", { name: /Exercise the controls/ }).click();
-  if (health.mode === "replay")
-    await expect(
-      page.getByRole("checkbox", { name: /Clear the shared cache/ }),
-    ).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Clear cache (test)" }),
-  ).toBeDisabled();
+  const preparation = await (await page.request.get("/api/judge/preparation")).json();
+  expect(preparation.status).toBe("not_started");
+  await expect(page.getByTestId("guide-step-5")).toBeDisabled();
+  await page.getByText("Additional cache test", {exact:true}).click();
+  const flush = page.getByRole("button",{name:"Flush cache (global, rate-limited)"});
+  if (health.mode==="live") await expect(flush).toBeEnabled();
+  else await expect(flush).toBeDisabled();
   await page.getByRole("button", { name: "Exit judge mode" }).click();
   await expect(
     page.getByRole("button", { name: "Start guided demo" }),
