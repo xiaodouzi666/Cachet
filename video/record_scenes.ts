@@ -290,6 +290,11 @@ const scenes = {
       page.locator(".bench-detail .bench-bar").first(),
     ).toBeVisible();
     await mark("gpu-benchmark");
+    const bands=await readJson(page,"benchmarks");
+    const measured=bands.reduce((best,band)=>band.prefix_len>best.prefix_len?band:best);
+    expect(measured.prefix_len).toBe(26000);
+    expect(measured.cold_ttft_ms_p50).toBeGreaterThan(measured.warm_ttft_ms_p50);
+    return {band:measured};
   },
   async S3({ page, go, mark, checkpoint }) {
     // Establish a fresh isolated workspace before the camera records the actual publications.
