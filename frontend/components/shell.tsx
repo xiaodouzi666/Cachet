@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { api, describe, useResource, workspace } from "../lib/client";
 import type { Health, State } from "../lib/types";
-import { Failure, Skeleton } from "./ui";
+import { Failure, ModeBadge, Skeleton } from "./ui";
 
 const nav = [
   { href: "/", label: "Overview", icon: PanelTop },
@@ -61,27 +61,6 @@ export function WorkspaceGate({ children }: { children: ReactNode }) {
       <Skeleton label="Opening workspace" />
     );
   return <>{children}</>;
-}
-function Mode({ health, error }: { health: Health | null; error: string }) {
-  const name = health?.mode;
-  const label =
-    name === "live"
-      ? "Live · self-hosted GPU"
-      : name === "hosted"
-        ? "Live · hosted cache fallback"
-        : name === "replay"
-          ? "Recorded GPU replay"
-          : name === "unavailable" || error
-            ? "Inference offline"
-            : "Checking inference";
-  return (
-    <span
-      className={`mode-dot ${name === "live" || name === "hosted" ? "online" : ""}`}
-      title={health?.gpu || health?.model || error || label}
-    >
-      {label}
-    </span>
-  );
 }
 export function RecordingMode() {
   const rec = useSearchParams().get("rec") === "1";
@@ -220,7 +199,7 @@ export function Shell({ children }: { children: ReactNode }) {
               </b>
             </span>
             <div className="top-status">
-              <Mode health={health.data} error={health.error} />
+              <ModeBadge health={health.data} error={health.error} />
               <span className="sandbox-label">
                 <Activity size={13} />
                 Sandbox
