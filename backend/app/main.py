@@ -7,7 +7,8 @@ import httpx
 
 from backend.app.config import ROOT, calibration, value
 from backend.app.db import init_db
-from backend.app.api import agent,catalog,copilot,finance,webhooks
+from backend.app.api import agent,catalog,copilot,finance,webhooks,inference_endpoint
+from backend.app.gateway.registration import monitor as monitor_endpoint
 from backend.app.gateway.modes import health as engine_health
 from backend.app.paypal.client import PayPalConfigError,PayPalError
 from backend.app.settlement.watchdog import recovery,start
@@ -15,13 +16,15 @@ from backend.app.settlement.watchdog import recovery,start
 
 @asynccontextmanager
 async def lifespan(app):
-    init_db();recovery();timer=start()
+    init_db();recovery();timer=start();endpoint_timer=monitor_endpoint()
     try:yield
-    finally:timer.set()
+    finally:
+        endpoint_timer.set()
+        timer.set()
 
 
 app=FastAPI(title="Cachet",version="0.2.0",lifespan=lifespan)
-for module in (catalog,agent,copilot,finance,webhooks):app.include_router(module.router)
+for module in (catalog,agent,copilot,finance,webhooks,inference_endpoint):app.include_router(module.router)
 
 @app.exception_handler(PayPalConfigError)
 async def config_error(request:Request,exc):
@@ -56,6 +59,6 @@ def revision():
 def health():
     state=engine_health()
     return {"service":"cachet-api","version":app.version,"build":revision(),**state,
-            "gpu":calibration()["gpu"] if state["mode"]=="live" else state.get("gpu"),
+            "gpu":state.get("gpu") or (calibration()["gpu"] if state["mode"]=="live" else None),
             "paypal_configured":bool(value("PAYPAL_ENV","sandbox")=="sandbox" and value("PAYPAL_CLIENT_ID") and value("PAYPAL_CLIENT_SECRET")),
             "card_enabled":bool(value("SANDBOX_TEST_CARD_NUMBER") and value("SANDBOX_TEST_CARD_EXPIRY"))}

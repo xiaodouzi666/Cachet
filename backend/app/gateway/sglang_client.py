@@ -10,6 +10,9 @@ from dotenv import dotenv_values
 
 
 def settings():
+    from backend.app.gateway import registration
+    if registration.enabled():
+        return registration.connection()
     root = Path(__file__).resolve().parents[3]
     values = dotenv_values(root / ".env")
     url = (
@@ -50,9 +53,10 @@ class Engine(httpx.Client):
             raise ValueError(
                 "Configure SGLANG_API_KEY for the Cachet inference service."
             )
-        super().__init__(
-            base_url=url, headers={"Authorization": f"Bearer {key}"}, timeout=180
-        )
+        from backend.app.gateway import registration
+        transport = registration.TunnelTransport(url) if mode == "live" and registration.enabled() else None
+        super().__init__(base_url=url, headers={"Authorization": f"Bearer {key}"}, timeout=180,
+                         transport=transport, follow_redirects=False)
 
     def flush(self, *, timeout_s=10):
         self.post("/flush_cache", params={"timeout": timeout_s}).raise_for_status()
