@@ -55,6 +55,8 @@ def save_snapshot(journal, path, snapshot):
 
 
 def run(args):
+    if (args.status or args.continue_if_needed) and not args.state.is_file():
+        raise RuntimeError("Provide the original private journal to inspect or continue a recording mandate.")
     cfg = settings()
     api_url = origin(args.api or require(cfg, "PUBLIC_API_URL"))
     if urlsplit(api_url).hostname not in ("127.0.0.1", "localhost", "::1"):
