@@ -100,8 +100,8 @@ async function forward(
   if (cookies.length) headers.set("cookie", cookies.join("; "));
   const cursor = req.headers.get("last-event-id");
   if (cursor) headers.set("last-event-id", cursor);
-  if (process.env.ADMIN_TOKEN) {
-    headers.set("x-admin-token", process.env.ADMIN_TOKEN);
+  if (process.env.BFF_TOKEN) {
+    headers.set("x-gateway-token", process.env.BFF_TOKEN);
   }
   try {
     const upstream = await fetch(url, {

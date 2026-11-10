@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 from ..agents.copilot import ModelFailure, reply
 from ..agents.copilot_tools import confirm
 from ..db import session_scope
-from .access import admin, client_ip, current_workspace, limit
+from .access import gateway, client_ip, current_workspace, limit
 
-router = APIRouter(prefix="/api", dependencies=[Depends(admin)])
+router = APIRouter(prefix="/api", dependencies=[Depends(gateway)])
 log = logging.getLogger(__name__)
 
 

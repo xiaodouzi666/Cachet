@@ -10,6 +10,7 @@ python_bin=${PYTHON:-$repo/.venv/bin/python}
 command -v tmux >/dev/null || { echo "Install tmux to start the development services." >&2; exit 1; }
 "$python_bin" -c 'import fastapi, uvicorn'
 test -x frontend/node_modules/.bin/next || { echo "Run npm ci --prefix frontend first." >&2; exit 1; }
+"$python_bin" scripts/local_env.py
 mkdir -p logs
 
 started=()

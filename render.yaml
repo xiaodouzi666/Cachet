@@ -1,33 +1,52 @@
 services:
   - type: web
-    name: cachet-api
-    runtime: python
+    name: cachet-api-cx6f2
+    runtime: docker
+    repo: https://github.com/xiaodouzi666/Cachet
+    branch: main
+    autoDeployTrigger: commit
+    region: singapore
     plan: starter
-    numInstances: 1
-    buildCommand: pip install -r backend/requirements.txt && python scripts/toolkit_probe.py install
-    startCommand: python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /api/health
+    numInstances: 1
     disk:
       name: cachet-ledger
       mountPath: /var/data
       sizeGB: 1
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.13"
-      - key: ADMIN_TOKEN
-        generateValue: true
       - key: DATABASE_URL
         value: sqlite:////var/data/cachet.db
       - key: PAYPAL_ENV
         value: sandbox
+      - key: INFERENCE_ENDPOINT_MODE
+        value: registered
+      - key: CAPTURE_THRESHOLD_USD
+        value: "2.00"
+      - key: FINAL_CAPTURE_MIN_USD
+        value: "1.00"
+      - key: PAYOUT_MIN_USD
+        value: "0.25"
+      - key: JUDGE_PAYOUT_MIN_USD
+        value: "0.01"
+      - key: MANDATE_MAX_AGE_H
+        value: "72"
+      - key: RUN_IDLE_END_MIN
+        value: "10"
+      - key: CACHET_SOAK_TOKEN
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: BFF_TOKEN
+        sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false
-      - key: PAYPAL_CAPTURE_POLICY
-        value: partial
       - key: JUDGE_BUYER_EMAIL
         sync: false
       - key: JUDGE_BUYER_PASSWORD
@@ -36,36 +55,41 @@ services:
         sync: false
       - key: PUBLISHER_FASTAPI_EMAIL
         sync: false
-      - key: PUBLIC_WEB_URL
+      - key: SANDBOX_TEST_CARD_NUMBER
         sync: false
-      - key: SGLANG_BASE_URL
+      - key: SANDBOX_TEST_CARD_EXPIRY
+        sync: false
+      - key: PUBLIC_WEB_URL
         sync: false
       - key: SGLANG_API_KEY
         sync: false
   - type: web
-    name: cachet-web
-    runtime: node
+    name: cachet-web-cx6f2
+    runtime: docker
+    repo: https://github.com/xiaodouzi666/Cachet
+    branch: main
+    autoDeployTrigger: commit
+    region: singapore
     plan: starter
-    buildCommand: npm ci --prefix frontend --include=dev && npm --prefix frontend run build
-    startCommand: npm --prefix frontend run start -- --hostname 0.0.0.0 --port $PORT
+    rootDir: frontend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /
     envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: PUBLIC_WEB_URL
-        fromService:
-          type: web
-          name: cachet-api
-          envVarKey: PUBLIC_WEB_URL
       - key: CACHET_API_URL
         fromService:
           type: web
-          name: cachet-api
+          name: cachet-api-cx6f2
           envVarKey: RENDER_EXTERNAL_URL
-      - key: ADMIN_TOKEN
+      - key: PUBLIC_WEB_URL
         fromService:
           type: web
-          name: cachet-api
-          envVarKey: ADMIN_TOKEN
+          name: cachet-api-cx6f2
+          envVarKey: PUBLIC_WEB_URL
+      - key: BFF_TOKEN
+        fromService:
+          type: web
+          name: cachet-api-cx6f2
+          envVarKey: BFF_TOKEN
       - key: NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY
         sync: false

@@ -5,11 +5,12 @@ import logging
 import threading
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import or_, select
 from starlette.concurrency import run_in_threadpool
 
 from backend.app import ledger
+from backend.app.api.access import admin
 from backend.app.db import session_scope
 from backend.app.models import Capture, Mandate, PayoutBatch, Refund, WebhookEvent, utcnow
 from backend.app.operations import Control, Operation
@@ -252,3 +253,18 @@ async def webhook(request: Request):
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(400, "Invalid JSON")
     return await run_in_threadpool(receive, dict(request.headers), event)
+
+
+@router.get("/api/operator/webhook-receipts/{identifier}", dependencies=[Depends(admin)])
+def webhook_receipt(identifier: str):
+    """Confirm a known sandbox resource's delivery without exposing the signed body."""
+    with session_scope(write=False) as db:
+        event = db.scalar(select(WebhookEvent).where(
+            WebhookEvent.resource_id == resource_id(identifier),
+            WebhookEvent.verified.is_(True),
+        ).order_by(WebhookEvent.received_at.desc()).limit(1))
+        if event is None:
+            raise HTTPException(404, "No verified webhook for this resource")
+        return {"event_id": event.paypal_event_id, "type": event.event_type,
+                "resource_id": event.resource_id, "verified": event.verified,
+                "received_at": event.received_at, "processed_at": event.processed_at}

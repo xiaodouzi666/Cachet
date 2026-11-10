@@ -47,6 +47,7 @@ async def invalid(request:Request,exc):
 def revision():
     configured=os.getenv("RENDER_GIT_COMMIT")
     if configured:return configured[:12]
+    if not (ROOT / ".git").exists():return None
     r=subprocess.run(["git","rev-parse","--short","HEAD"],cwd=ROOT,capture_output=True,text=True)
     return r.stdout.strip() or None
 

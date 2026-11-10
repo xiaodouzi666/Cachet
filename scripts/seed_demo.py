@@ -27,7 +27,10 @@ def seed(demo):
 
 if __name__ == "__main__":
     parser = arguments(argparse.ArgumentParser(description=__doc__))
+    parser.add_argument("--catalog-only", action="store_true",
+                        help="Publish and probe the two contexts without creating any mandates or sessions.")
     try:
-        execute(parser.parse_args(), seed)
+        args = parser.parse_args()
+        execute(args, (lambda demo: None) if args.catalog_only else seed)
     except (RuntimeError, ValueError, httpx.HTTPError, OSError) as exc:
         parser.exit(1, str(exc) + "\n")
