@@ -37,8 +37,12 @@ async function publishLayers(
     await page
       .getByRole("button", { name: /Use configured sandbox receiver/ })
       .click();
-    if (slug === "fastapi")
-      await expect(page.getByLabel("Parent context")).not.toHaveValue("");
+    if (slug === "fastapi") {
+      const parent = (await readJson(page, "contexts")).find(c => c.can_manage && c.slug === "starlette");
+      if (!parent) throw Error("This workspace has no published Starlette parent.");
+      await page.getByLabel("Parent context").selectOption(parent.id);
+      await expect(page.getByLabel("Parent context")).toHaveValue(parent.id);
+    }
     await page
       .getByRole("button", {
         name: replay ? "Register for replay" : "Publish and warm",
@@ -94,6 +98,9 @@ async function approve(
             ),
         );
         await popup.waitForLoadState("domcontentloaded");
+        await expect.poll(async () => popup.locator("body").innerText(), {
+          timeout:45000, message:"Waiting for the real sandbox checkout to render before redaction",
+        }).toMatch(/PayPal|Log in|Continue|Approve|支付|登录/i);
         // Capture the untouched sandbox approval surface. All input and embedded frames are masked.
         await mark("sandbox-wallet-open", popup, [
           popup.locator("input, iframe"),
@@ -135,7 +142,7 @@ async function selectFastAPI(page) {
   const contexts = await readJson(page, "contexts");
   const replay = (await readJson(page, "health")).mode === "replay";
   const published = contexts.find(
-    (c) => c.slug === "fastapi" && (replay || c.status === "hot"),
+    (c) => c.can_manage && c.slug === "fastapi" && (replay || c.status === "hot"),
   );
   if (!published)
     throw Error("Publish and warm FastAPI before requesting its task quote.");
@@ -143,29 +150,16 @@ async function selectFastAPI(page) {
 }
 async function quote(page, mark = quietMark) {
   await selectFastAPI(page);
-  await page.getByRole("button", { name: "Get quote" }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/quote"),
+    page.getByRole("button", { name: "Get quote" }).click(),
+  ]);
+  expect(response.ok()).toBe(true);
+  const measured = await response.json();
+  expect(measured.decision).toBe("buy");
   await expect(page.locator(".quote-box .tag")).toHaveText("buy");
   await mark("measured-quote");
-}
-async function control(page, label, resultTitle) {
-  const prior = page.getByTestId("judge-result");
-  const responseWait = page.waitForResponse(
-    (r) =>
-      r.request().method() !== "OPTIONS" &&
-      r.url().includes("/api/") &&
-      r.url().includes(resultTitle),
-    { timeout: 90000 },
-  );
-  await page.getByRole("button", { name: label, exact: true }).click();
-  const response = await responseWait;
-  if (!response.ok())
-    throw Error(`${label} failed with HTTP ${response.status()}.`);
-  await expect(prior).toBeVisible();
-  return response.json();
-}
-async function inject(page) {
-  const receipt = await control(page, "Fault injection (test)", "/judge/fault");
-  expect(receipt.calls).toBe(3);
+  return measured;
 }
 async function completedTurns(page, mark = quietMark) {
   await expect(page.locator(".table-scroller tbody tr")).toHaveCount(10, {
@@ -218,18 +212,6 @@ async function readRunTurns(page, runId, flushId = null) {
   );
 }
 
-function checkSceneRun(state, scene, status) {
-  if (
-    !scene ||
-    state.workspace_id !== scene.workspaceId ||
-    state.mandate?.id !== scene.mandateId ||
-    state.run?.mandate_id !== scene.mandateId ||
-    state.run?.id !== scene.runId ||
-    state.run.mode !== "live" ||
-    state.run.status !== status
-  )
-    throw Error(`S6 requires the same ${status} live S5 run and mandate.`);
-}
 function isColdAndFree(turn, flushId) {
   if (!flushId || turn.cache_flush_id !== flushId) return false;
   const publishers =
@@ -251,25 +233,6 @@ function isFaultedWarmBreach(turn, mode) {
     turn.spans_json.some((s) => s.kind === "publisher" && s.hits > 0)
   );
 }
-function matchesRefund(refund, captures, audit, breaches) {
-  const capture = captures.find((r) => r.id === refund.capture_id);
-  if (
-    !capture ||
-    !refund.paypal_refund_id ||
-    refund.status !== "COMPLETED" ||
-    !(refund.amount_cents > 0)
-  )
-    return false;
-  return (
-    refund.reason === "sla" &&
-    audit.refunds.some((r) => r.paypal_refund_id === refund.paypal_refund_id) &&
-    breaches.some(
-      (t) =>
-        capture.call_ids_json.includes(t.id) &&
-        refund.call_ids_json.includes(t.id),
-    )
-  );
-}
 function meteredRow(page, turn) {
   return page.locator(".table-scroller tbody tr").filter({
     has: page.locator("td:first-child", {
@@ -277,210 +240,8 @@ function meteredRow(page, turn) {
     }),
   });
 }
-async function auditAndClose(page, mark = quietMark, scene = null) {
-  const state = await readState(page);
-  if (scene) checkSceneRun(state, scene, "completed");
-  const original = state.mandate;
-  const run = state.run;
-  if (
-    !original ||
-    run?.mandate_id !== original.id ||
-    run.status !== "completed" ||
-    !["live", "hosted", "replay"].includes(run.mode)
-  )
-    throw Error("Audit requires this mandate's completed metered run.");
-  const breaches =
-    scene?.breaches ||
-    (await readRunTurns(page, run.id)).filter((turn) =>
-      isFaultedWarmBreach(turn, run.mode),
-    );
-  expect(
-    breaches.length,
-    "Audit requires a measured faulted warm SLA breach in this run",
-  ).toBeGreaterThan(0);
-  await control(page, "Capture now (test)", "/judge/capture-now");
-  const captured = async () =>
-    (await readJson(page, "captures")).filter(
-      (r) =>
-        r.mandate_id === original.id &&
-        r.paypal_capture_id &&
-        breaches.some((t) => r.call_ids_json.includes(t.id)),
-    );
-  let captures = await captured();
-  if (!captures.length) {
-    // Some sandbox accounts support collection only on the final capture.
-    await control(page, "Close mandate", "/close");
-    captures = await captured();
-  }
-  expect(captures.length).toBeGreaterThan(0);
-  const audit = await control(page, "Audit SLA (test)", "/judge/audit");
-  expect(audit.calls_reviewed).toBeGreaterThan(0);
-  const refunds = await readJson(page, "refunds");
-  const receipt = refunds.find((r) =>
-    matchesRefund(r, captures, audit, breaches),
-  );
-  expect(
-    receipt,
-    "Expected a completed PayPal refund for the captured SLA breach",
-  ).toBeTruthy();
-  await expect(page.getByTestId("judge-result")).toContainText(
-    receipt.paypal_refund_id,
-  );
-  if (scene) await page.getByTestId("judge-result").scrollIntoViewIfNeeded();
-  await mark("refund-readback");
-  if (!["CLOSED", "VOIDED"].includes((await readState(page)).mandate.status))
-    await control(page, "Close mandate", "/close");
-  const mandate = (await readState(page)).mandate;
-  expect(mandate.id).toBe(original.id);
-  expect(["CLOSED", "VOIDED"]).toContain(mandate.status);
-  expect(mandate.released_micros).toBeGreaterThan(0);
-  if (scene) {
-    await page.goto("/agent?rec=1");
-    const released = page
-      .locator(".money-strip > div")
-      .filter({ hasText: "Released" });
-    await expect(released.locator(".money-val")).toHaveText(
-      (mandate.released_micros / 1000000).toLocaleString("en-US", {
-        style: "currency",
-        currency: "USD",
-      }),
-    );
-    await released.scrollIntoViewIfNeeded();
-  }
-  await mark("unused-budget-released");
-  return { receipt, released_micros: mandate.released_micros };
-}
-
-async function eligiblePublishers(page) {
-  const contexts = await readJson(page, "contexts");
-  const ledger = await readJson(page, "ledger");
-  const owners = new Set(contexts.map((c) => c.publisher_id));
-  return [...owners].filter(
-    (id) =>
-      ledger
-        .filter((r) => r.account === "publisher:" + id + ":payable")
-        .reduce((net, r) => net + r.credit_micros - r.debit_micros, 0) >= 10000,
-  );
-}
-async function settleAndReconcile(
-  page,
-  mark = quietMark,
-  { requireBoth = false } = {},
-) {
-  const eligible = await eligiblePublishers(page);
-  if (requireBoth && eligible.length < 2)
-    throw Error(
-      "Two eligible publisher balances are needed for S7. Supply the completed operator seed journal with CACHET_S7_SEED_JOURNAL.",
-    );
-  const outcome = await control(
-    page,
-    "Settle royalties (test)",
-    "/judge/settle",
-  );
-  if (outcome.status === "below_minimum" && !requireBoth) {
-    expect(eligible.length).toBe(0);
-    await mark("settlement-below-minimum");
-  } else {
-    expect(outcome.paypal_batch_id).toBeTruthy();
-    const batches = await readJson(page, "payouts");
-    const batch = batches.find(
-      (r) => r.paypal_batch_id === outcome.paypal_batch_id,
-    );
-    expect(batch).toBeTruthy();
-    if (requireBoth) {
-      await expect
-        .poll(
-          async () => {
-            const rows = await readJson(page, "payouts");
-            const current = rows.find(
-              (r) => r.paypal_batch_id === batch.paypal_batch_id,
-            );
-            return new Set(
-              current?.items
-                .filter((i) => i.status === "SUCCESS" && i.paypal_item_id)
-                .map((i) => i.publisher_id),
-            ).size;
-          },
-          { timeout: 120000 },
-        )
-        .toBeGreaterThanOrEqual(2);
-    }
-  }
-  const reconciliation = await control(
-    page,
-    "Reconcile with PayPal",
-    "/reconcile",
-  );
-  expect(reconciliation.ok).toBe(true);
-  expect(reconciliation.checked).toBeGreaterThan(0);
-  await mark("paypal-reconciled");
-}
-
-async function applySeedJournal(context, baseURL, file) {
-  const resolved = await fs.realpath(file);
-  const relative = path.relative(
-    await fs.realpath(path.join(root, "logs")),
-    resolved,
-  );
-  if (relative.startsWith("..") || path.isAbsolute(relative))
-    throw Error(
-      "Choose the private operator journal inside the repository logs directory.",
-    );
-  const stat = await fs.stat(resolved);
-  if (!stat.isFile() || (stat.mode & 0o077) !== 0)
-    throw Error("The workspace journal must be readable only by its owner.");
-  const journal = JSON.parse(await fs.readFile(resolved, "utf8"));
-  if (
-    !journal.workspace_cookie ||
-    !journal.workspace_id ||
-    !journal.seed?.distinct_live_sessions
-  )
-    throw Error("The selected journal has no completed operator seed.");
-  const webOrigin = new URL(baseURL);
-  const loopback = (url) =>
-    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  const matchingLocal =
-    loopback(webOrigin) && loopback(new URL(journal.origin));
-  const matchingDeployment =
-    process.env.PUBLIC_WEB_URL &&
-    new URL(process.env.PUBLIC_WEB_URL).origin === webOrigin.origin &&
-    [process.env.CACHET_API_URL, process.env.PUBLIC_API_URL]
-      .filter(Boolean)
-      .some((api) => new URL(api).origin === new URL(journal.origin).origin);
-  if (!matchingLocal && !matchingDeployment)
-    throw Error(
-      "The private operator journal and configured deployment origins do not match.",
-    );
-  await context.addCookies([
-    {
-      name: "cachet_workspace",
-      value: journal.workspace_cookie,
-      url: new URL(baseURL).origin,
-      httpOnly: true,
-      sameSite: "Lax",
-      secure: new URL(baseURL).protocol === "https:",
-    },
-  ]);
-  const page = await context.newPage();
-  try {
-    const state = await readState(page);
-    if (
-      state.kind !== "judge" ||
-      state.workspace_id !== journal.workspace_id ||
-      !state.operator_seeded ||
-      state.operator_seed_run_count < journal.seed.distinct_live_sessions
-    )
-      throw Error(
-        "The recording server did not verify the operator-seeded workspace in this journal.",
-      );
-  } finally {
-    await page.close();
-    await page.video()?.delete();
-  }
-}
-
 const scenes = {
-  async S1({ page, go, mark, archiveGallery }) {
+  async S1({ page, go, mark, archiveGallery, s5 }) {
     if (archiveGallery) {
       await go("/dev/ui");
       const archive = page.locator('.archive-turn[data-alternate="false"]');
@@ -499,7 +260,9 @@ const scenes = {
     await expect(
       page.getByRole("heading", { name: "Run activity" }),
     ).toBeVisible();
-    if ((await readState(page)).run) {
+    const run = (await readState(page)).run;
+    if (s5) expect(run?.id).toBe(s5.runId);
+    if (run) {
       await completedTurns(page);
       await page.locator(".prefix-stack").scrollIntoViewIfNeeded();
       await page
@@ -527,165 +290,140 @@ const scenes = {
     ).toBeVisible();
     await mark("gpu-benchmark");
   },
-  async S3({ page, go, mark }) {
+  async S3({ page, go, mark, checkpoint }) {
+    // Establish a fresh isolated workspace before the camera records the actual publications.
+    const opened = await page.request.post("/api/judge/workspace", { data: { kind: "judge" } });
+    expect(opened.ok()).toBe(true);
+    const workspace = await opened.json();
+    expect(workspace.kind).toBe("judge");
+    await checkpoint({workspaceId:workspace.workspace_id});
+    await go("/publish");
+    const state = await readState(page);
+    expect(state.workspace_id).toBe(workspace.workspace_id);
+    expect((await readJson(page, "contexts")).filter(c => c.can_manage)).toHaveLength(0);
+    await publishLayers(page, state, mark, { requireLive: true });
+    const contexts = (await readJson(page, "contexts")).filter(c => c.can_manage);
+    const base = contexts.find((c) => c.slug === "starlette");
+    const child = contexts.find((c) => c.slug === "fastapi");
+    expect(base && child && child.parent_id === base.id).toBeTruthy();
     await go("/judge");
     await page.getByRole("button", { name: "Start guided demo" }).click();
-    await expect(page.getByText("Workspace open")).toBeVisible();
-    const state = await readState(page);
-    await go("/publish");
-    await publishLayers(page, state, mark, { requireLive: true });
+    await expect(page.getByTestId("guide-step-1")).toHaveAttribute("data-complete", "true", {timeout: 120000});
+    expect((await readState(page)).workspace_id).toBe(workspace.workspace_id);
+    return { workspaceId: workspace.workspace_id, starletteId: base.id, fastapiId: child.id,
+      minimumProbeRatio:Math.min(base.last_probe_hit_ratio,child.last_probe_hit_ratio) };
   },
-  async S4({ page, go, mark }) {
+  async S4({ page, go, mark, checkpoint, s3 }) {
     await go("/agent");
     const state = await readState(page);
+    expect(state.workspace_id).toBe(s3.workspaceId);
+    expect(state.kind).toBe("judge");
+    expect(state.mandate).toBeFalsy();
     await approve(page, state, mark, { walletOnly: true });
-    await quote(page, mark);
+    const mandate = (await readState(page)).mandate;
+    expect(mandate.cap_micros).toBe(5000000);
+    expect(mandate.payment_method).toBe("wallet");
+    await checkpoint({mandateId:mandate.id, orderId:mandate.paypal_order_id, authorizationId:mandate.authorization_id});
+    const measured = await quote(page, mark);
+    return { quote:measured, mandateId: mandate.id, orderId: mandate.paypal_order_id, authorizationId: mandate.authorization_id };
   },
-  async S5({ page, go, mark }) {
-    await go("/agent");
-    await quote(page);
+  async S5({ page, go, mark, s3, s4 }) {
+    await go("/judge");
     const state = await readState(page);
-    if (
-      state.kind !== "judge" ||
-      state.mandate?.status !== "ACTIVE" ||
-      state.run ||
-      (await readJson(page, "health")).mode !== "live"
-    )
-      throw Error(
-        "Start S5 with the fresh judge workspace, approved mandate and live GPU.",
-      );
-    const started = page.waitForResponse(
-      (r) =>
-        r.request().method() === "POST" &&
-        new URL(r.url()).pathname === "/api/agent/runs",
-    );
-    await page.getByRole("button", { name: "Run agent", exact: true }).click();
-    const response = await started;
-    if (!response.ok())
-      throw Error(`Starting the S5 run failed with HTTP ${response.status()}.`);
-    const { run_id: runId } = await response.json();
+    expect(state.workspace_id).toBe(s3.workspaceId);
+    expect(state.mandate?.id).toBe(s4.mandateId);
+    expect(state.mandate?.status).toBe("ACTIVE");
+    expect((await readJson(page, "health")).mode).toBe("live");
+    // Sponsor traffic ends before filming so the later global cold test is attributable.
+    await expect.poll(async () => (await readJson(page, "judge/walkthrough")).preparation.status,
+      {timeout: 15 * 60 * 1000}).toBe("ready");
+    await page.getByTestId("guide-step-3").click();
+    const [started] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === "/api/judge/task" && r.request().method() === "POST"),
+      page.getByRole("button", { name: "Run agent task", exact: true }).click(),
+    ]);
+    expect(started.ok()).toBe(true);
+    const {run_id: runId} = await started.json();
     expect(runId).toBeTruthy();
-    await expect(page.locator(".events")).toContainText("decision");
-    await expect(page.locator(".table-scroller tbody tr").first()).toBeVisible({
-      timeout: 90000,
-    });
+    await go("/agent");
+    const decision = page.locator("ul.events > li").filter({has:page.locator("b",{hasText:/^decision$/})});
+    await expect(decision).toContainText("Live model explanation", {timeout:120000});
+    await expect(decision.locator("span")).toContainText(/buy/i);
+    await decision.scrollIntoViewIfNeeded();
+    await mark("live-buy-decision");
+    const rows = page.locator(".table-scroller tbody tr");
+    await expect(rows.first()).toBeVisible({timeout: 120000});
+    await rows.first().scrollIntoViewIfNeeded();
     await mark("first-metered-turn");
-    return {
-      workspaceId: state.workspace_id,
-      mandateId: state.mandate.id,
-      runId,
-    };
+    await completedTurns(page, mark);
+    const turns = await readRunTurns(page, runId);
+    expect(turns).toHaveLength(10);
+    expect(turns.every(t => t.mode === "live" && t.prompt_tokens > 0 && t.charge_micros > 0)).toBe(true);
+    expect(turns.some(t => t.public_charge_micros > 0)).toBe(true);
+    return {workspaceId: state.workspace_id, mandateId: state.mandate.id, runId,
+      calls: turns.map(t => t.id)};
   },
   async S6({ page, go, mark, s5 }) {
     await go("/judge");
-    checkSceneRun(await readState(page), s5, "running");
-    await page.getByRole("button", { name: /Exercise the controls/ }).click();
-    await page
-      .getByRole("checkbox", { name: /Clear the shared cache/ })
-      .check();
-    const { flush_id: flushId } = await control(
-      page,
-      "Clear cache (test)",
-      "/judge/flush-cache",
-    );
-    expect(
-      flushId,
-      "The GPU flush must return its admission marker",
-    ).toBeTruthy();
-    await mark("test-cache-flush");
-    const [cold] = await readRunTurns(page, s5.runId, flushId);
-    expect(
-      isColdAndFree(cold, flushId),
-      "First live turn admitted after this flush must have zero public charge and publisher hits/royalties",
-    ).toBe(true);
-    await page.getByRole("button", { name: /Run a coding task/ }).click();
-    await expect(meteredRow(page, cold.turn)).toContainText(
-      "Cold · free public prefix",
-    );
-    await meteredRow(page, cold.turn).scrollIntoViewIfNeeded();
-    await mark("cold-free-public-prefix");
-    await page.getByRole("button", { name: /Exercise the controls/ }).click();
-    if (cold.turn >= 10)
-      throw Error("No subsequent turn remains for the fault demonstration.");
-    checkSceneRun(await readState(page), s5, "running");
-    await inject(page);
-    await mark("test-fault-installed");
-    await page.getByRole("button", { name: /Run a coding task/ }).click();
-    await completedTurns(page, mark);
-    const turns = await readRunTurns(page, s5.runId);
-    const breaches = turns.filter(
-      (t) => t.turn > cold.turn && isFaultedWarmBreach(t, "live"),
-    );
-    expect(
-      breaches.length,
-      "Expected a later live, delayed publisher hit with a measured SLA breach",
-    ).toBeGreaterThan(0);
-    const row = meteredRow(page, breaches[0].turn);
-    await expect(row).toContainText("Fault injection (test)");
-    await expect(row).toContainText("SLA breach");
-    await row.scrollIntoViewIfNeeded();
-    await mark("faulted-warm-sla-breach");
-    await page.getByRole("button", { name: /Exercise the controls/ }).click();
-    const { receipt, released_micros } = await auditAndClose(page, mark, {
-      ...s5,
-      breaches,
-    });
-    return {
-      ...s5,
-      flushId,
-      coldCallId: cold.id,
-      coldTurn: cold.turn,
-      refundedTurns: breaches
-        .filter((t) => receipt.call_ids_json.includes(t.id))
-        .map((t) => ({ callId: t.id, turn: t.turn })),
-      paypalRefundId: receipt.paypal_refund_id,
-      releasedMicros: released_micros,
-    };
-  },
-  async S7({ page, go, mark }) {
-    await go("/judge");
-    await page.getByRole("button", { name: /Settle and reconcile/ }).click();
-    await settleAndReconcile(page, mark, { requireBoth: true });
-    await go("/settlement");
-    const tabs = page.getByRole("navigation", {
-      name: "Settlement statements",
-    });
-    await tabs.getByRole("button", { name: "Payout batches" }).click();
-    await expect(page.locator(".ag-root-wrapper").first()).toBeVisible();
-    await mark("payout-batches");
-    await tabs.getByRole("button", { name: "Royalties" }).click();
-    for (const name of ["Linear", "Shapley"]) {
-      const basis = page.getByRole("button", { name, exact: true });
-      await basis.click();
-      await expect(basis).toHaveAttribute("aria-pressed", "true");
-      await mark(name.toLowerCase() + "-allocation");
+    const state = await readState(page);
+    expect(state.workspace_id).toBe(s5.workspaceId);
+    expect(state.mandate?.id).toBe(s5.mandateId);
+    expect(state.run?.id).toBe(s5.runId);
+    const step = n => page.getByTestId("guide-step-" + n);
+    await step(4).click();
+    await page.getByRole("button", {name:"Capture now (test)",exact:true}).click();
+    await expect(step(4)).toHaveAttribute("data-complete","true",{timeout:120000});
+    let flushId;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.getByText("Additional cache test",{exact:true}).click();
+      await page.getByRole("button",{name:"Flush cache (global, rate-limited)"}).click();
+      const [response] = await Promise.all([
+        page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/judge/flush-cache"),
+        page.getByRole("button",{name:"Confirm global flush"}).click(),
+      ]);
+      if (response.status() === 429) {
+        const seconds = Number(response.headers()["retry-after"]);
+        if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) throw Error("Invalid global flush cooldown.");
+        await new Promise(resolve => setTimeout(resolve, (seconds + 1) * 1000));
+        await go("/judge");
+        continue;
+      }
+      if (!response.ok()) throw Error("Global cache flush HTTP " + response.status());
+      flushId = (await response.json()).flush_id;
+      break;
     }
-    await page.getByRole("button", { name: /Ops Copilot/ }).click();
-    const question =
-      "How much did Starlette earn this week, and why more per token than FastAPI?";
-    await page
-      .getByRole("textbox", { name: "Message input" })
-      .pressSequentially(question, { delay: 35 });
-    const reply = page.waitForResponse(
-      (r) =>
-        r.url().endsWith("/api/copilot") && r.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "Send message" }).click();
-    const response = await reply;
-    const result = await response.text();
-    if (
-      !response.ok() ||
-      !result.includes("event: done") ||
-      result.includes("event: error")
-    )
-      throw Error("The Ops Copilot could not ground the royalty explanation.");
-    const delta = result
-      .split(/\r?\n\r?\n/)
-      .find((frame) => frame.startsWith("event: delta"));
-    const text = delta && JSON.parse(delta.split("\ndata: ")[1]).text.trim();
-    if (!text) throw Error("The Ops Copilot returned no evidence.");
-    await expect(page.getByText(text, { exact: false }).last()).toBeVisible();
-    await mark("copilot-grounded-answer");
+    expect(flushId).toBeTruthy();
+    await mark("global-cache-flushed");
+    await go("/agent");
+    await selectFastAPI(page);
+    const [started] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==="POST" && new URL(r.url()).pathname==="/api/agent/runs"),
+      page.getByRole("button",{name:"Run agent",exact:true}).click(),
+    ]);
+    expect(started.ok()).toBe(true);
+    const {run_id:coldRun}=await started.json();
+    const [cold]=await readRunTurns(page,coldRun,flushId);
+    expect(isColdAndFree(cold,flushId)).toBe(true);
+    const coldRow=meteredRow(page,cold.turn);
+    await expect(coldRow).toContainText("Cold · free public prefix");
+    await coldRow.scrollIntoViewIfNeeded();
+    await mark("cold-free-public-prefix");
+    await completedTurns(page);
+    await go("/judge");
+    await step(5).click();
+    await page.getByRole("button",{name:"Inject three delays, capture and audit (test)",exact:true}).click();
+    await expect(step(5)).toHaveAttribute("data-complete","true",{timeout:240000});
+    const guide=await readJson(page,"judge/walkthrough");
+    expect(guide.followup.mandate_id).toBe(s5.mandateId);
+    const breaches=await readRunTurns(page,guide.followup.id);
+    expect(breaches).toHaveLength(3);
+    expect(breaches.every(t=>isFaultedWarmBreach(t,"live"))).toBe(true);
+    const receipts=guide.refunds.filter(r=>r.id && r.amount_cents>0);
+    expect(breaches.every(t=>receipts.some(r=>r.call_ids.includes(t.id)))).toBe(true);
+    await expect(page.getByText(receipts[0].id,{exact:true})).toBeVisible();
+    await mark("paypal-fault-refund");
+    return {workspaceId:s5.workspaceId,mandateId:s5.mandateId,flushId,coldCall:cold.id,
+      faultRun:guide.followup.id,refunds:receipts};
   },
   async S8({ page, baseURL, mark }) {
     const graphic = process.env.CACHET_ARCHITECTURE_URL || "/architecture.svg";
@@ -701,146 +439,14 @@ const scenes = {
     await mark("architecture-and-apis");
   },
 };
+const {runRecorder} = require("./record_driver.cjs");
+
 async function main() {
-  const args = process.argv.slice(2);
-  const rehearsal = args.includes("--rehearsal");
-  const archiveGallery = args.includes("--archive-gallery");
-  if (archiveGallery && !rehearsal)
-    throw Error("The public archive gallery is available for rehearsals only.");
-  const baseURL = process.env.CACHET_WEB_URL;
-  if (!baseURL || (!rehearsal && new URL(baseURL).protocol !== "https:"))
-    throw Error(
-      "Set CACHET_WEB_URL to the production HTTPS site. For a local preview, pass --rehearsal.",
-    );
-  const names = (
-    args.find((arg) => !arg.startsWith("--")) || "S2,S3,S4,S5,S6,S7,S1,S8"
-  ).split(",");
-  if (names.some((name) => !scenes[name]))
-    throw Error("Choose scene IDs S1 through S8.");
-  const directory = path.join(
-    __dirname,
-    "out",
-    rehearsal ? "rehearsals" : "takes",
-    new Date().toISOString().replace(/[:.]/g, "-"),
-  );
-  await fs.mkdir(directory, { recursive: true });
-  const timeline = { origin: new URL(baseURL).origin, rehearsal, scenes: {} };
-  let state, pendingS5Video;
-  const scratchRoot = path.join(root, ".cache", "recordings");
-  await fs.mkdir(scratchRoot, { recursive: true, mode: 0o700 });
-  const scratch = await fs.mkdtemp(path.join(scratchRoot, "take-"));
-  const browser = await chromium.launch({
-    slowMo: 60,
-    channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || undefined,
-  });
-  try {
-    for (const [index, name] of names.entries()) {
-      const context = await browser.newContext({
-        baseURL,
-        storageState: state,
-        viewport: { width: 1920, height: 1080 },
-        recordVideo: { dir: scratch, size: { width: 1920, height: 1080 } },
-      });
-      const useSeed = name === "S7" && process.env.CACHET_S7_SEED_JOURNAL;
-      if (useSeed)
-        await applySeedJournal(
-          context,
-          baseURL,
-          process.env.CACHET_S7_SEED_JOURNAL,
-        );
-      const page = await context.newPage();
-      const start = performance.now();
-      const entry = { status: "recording", events: [] };
-      timeline.scenes[name] = entry;
-      try {
-        const go = async (pathname) => {
-          await page.goto(pathname + "?rec=1");
-          await expect(page.locator("html")).toHaveClass(/recording/);
-        };
-        const mark = async (label, target = page, mask = []) => {
-          await target.screenshot({
-            mask,
-            path: path.join(directory, name + "-" + label + ".png"),
-          });
-          entry.events.push({
-            label,
-            ms: Math.round(performance.now() - start),
-          });
-        };
-        const evidence = await scenes[name]({
-          page,
-          go,
-          mark,
-          baseURL,
-          archiveGallery,
-          s5: timeline.scenes.S5?.evidence,
-        });
-        if (evidence) entry.evidence = evidence;
-        if (!useSeed) {
-          const capture = await context.storageState();
-          const domain = new URL(baseURL).hostname;
-          state = {
-            cookies: capture.cookies.filter(
-              (c) =>
-                c.domain === domain &&
-                ["cachet_workspace", "cachet_user_workspace"].includes(c.name),
-            ),
-            origins: [],
-          };
-        }
-        entry.status = "captured";
-      } catch (e) {
-        entry.status = "incomplete";
-        throw e;
-      } finally {
-        const saveVideo = async () => {
-          const video = page.video();
-          await context.close();
-          if (video) {
-            const suffix = entry.status === "captured" ? "" : "-incomplete";
-            await video.saveAs(path.join(directory, name + suffix + ".webm"));
-            await video.delete();
-          }
-        };
-        // Stop S5's camera immediately. Its WebM can finish encoding while
-        // S6 opens the controls on the same running ten-turn workload.
-        if (
-          name === "S5" &&
-          entry.status === "captured" &&
-          names[index + 1] === "S6"
-        ) {
-          pendingS5Video = Promise.allSettled([saveVideo()]);
-        } else {
-          await saveVideo();
-        }
-        await fs.writeFile(
-          path.join(directory, "timeline.json"),
-          JSON.stringify(timeline, null, 2) + "\n",
-        );
-      }
-    }
-  } finally {
-    const [s5Save] = await (pendingS5Video || []);
-    await browser.close();
-    await fs.rm(scratch, { force: true, recursive: true });
-    console.log(path.relative(root, directory));
-    if (s5Save?.status === "rejected") throw s5Save.reason;
-  }
+  return runRecorder({scenes, chromium, expect, readState, readJson}, process.argv.slice(2));
 }
-module.exports = {
-  readState,
-  publishLayers,
-  approve,
-  quote,
-  inject,
-  completedTurns,
-  auditAndClose,
-  settleAndReconcile,
-  isColdAndFree,
-  isFaultedWarmBreach,
-};
-if (require.main === module)
-  main().catch((e) => {
-    console.error(String(e.message).split("Call log:")[0]);
-    process.exitCode = 1;
-  });
+module.exports = { scenes, main, readState, publishLayers, approve, quote, completedTurns,
+  isColdAndFree, isFaultedWarmBreach };
+if (require.main === module) main().catch(error => {
+  console.error(String(error.message).split("Call log:")[0]);
+  process.exitCode = 1;
+});
