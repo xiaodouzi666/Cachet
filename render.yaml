@@ -35,6 +35,8 @@ services:
         value: "72"
       - key: RUN_IDLE_END_MIN
         value: "10"
+      - key: CACHET_SOAK_TOKEN
+        sync: false
       - key: ADMIN_TOKEN
         sync: false
       - key: BFF_TOKEN

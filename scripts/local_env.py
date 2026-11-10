@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     target = ROOT / ".env"
-    directory = os.open(ROOT, os.O_RDONLY)
+    lock_fd = os.open(ROOT / ".env.lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(directory, fcntl.LOCK_EX)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
         if target.exists():
             content = target.read_text()
         else:
@@ -52,7 +52,7 @@ def main():
                 staged.unlink(missing_ok=True)
         print("Configured the private development gateway token in .env.")
     finally:
-        os.close(directory)
+        os.close(lock_fd)
 
 
 if __name__ == "__main__":

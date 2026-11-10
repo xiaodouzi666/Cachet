@@ -64,13 +64,14 @@ class Demo:
         check(response.is_success, f"Backend {method} {route} returned HTTP {response.status_code}. Resume with the same state after inspecting the backend.")
         return response.json()
 
-    def connect(self, api_url):
+    def connect(self, api_url, *, workspace_kind="judge"):
+        check(workspace_kind in ("judge", "user"), "Choose a known workspace kind.")
         check(self.data.setdefault("origin", api_url) == api_url, "Resume this workspace on its original backend.")
         if self.data.get("workspace_cookie"):
             self.api.cookies.set("cachet_workspace", self.data["workspace_cookie"])
             state = self.call("GET", "/judge/state")
-            check(self.data["workspace_id"] == state["workspace_id"] and state["kind"] == "judge",
-                  "The journal's original judge workspace is required.")
+            check(self.data["workspace_id"] == state["workspace_id"] and state["kind"] == workspace_kind,
+                  "The journal's original workspace is required.")
             # An interrupted GPU must not prevent closing an existing sandbox authorization.
             active = next((s for s in self.sessions if not s.get("finished")), None)
             last = state.get("run")
@@ -94,10 +95,10 @@ class Demo:
         check(len(set(x.casefold() for x in emails)) == len(SOURCES), "Provide two distinct publisher recipients.")
         self.pp.access_token()
         if not self.data.get("workspace_cookie"):
-            state = self.call("POST", "/judge/workspace", {"kind":"judge"})
+            state = self.call("POST", "/judge/workspace", {"kind":workspace_kind})
             self.data.update(workspace_id=state["workspace_id"], workspace_cookie=self.api.cookies["cachet_workspace"])
             self.journal.save()
-        check(state["kind"] == "judge", "Use a dedicated judge workspace for operator test traffic.")
+        check(state["kind"] == workspace_kind, "The operator journal workspace kind differs.")
         self.data["health"] = {key: health.get(key) for key in ("service", "version", "mode", "gpu", "model", "build")}
         warm = {}
         for slug, email in zip(SOURCES, emails):
@@ -430,7 +431,10 @@ def execute(args, action=None):
             with PayPalClient(config) as pp, httpx.Client(base_url=url, headers={"X-Admin-Token":token},
                         follow_redirects=False, timeout=httpx.Timeout(240, connect=10)) as api:
                 demo = Demo(state, api, pp, config, payment, getattr(args, "require_mode", "live"))
-                demo.connect(url)
+                if getattr(args, "catalog_only", False):
+                    demo.connect(url, workspace_kind="user")
+                else:
+                    demo.connect(url)
                 if action is None:
                     demo.acceptance(args.repeats, new_suite=bool(start_new))
                 else:
