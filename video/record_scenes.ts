@@ -119,6 +119,7 @@ async function approve(
           mandate.cap_micros > 0 && mandate.cap_micros % 10000 === 0,
         );
       }, { timeout: 30000, message: "Waiting for the workspace wallet order and its verified USD budget" }).toBe(true);
+      if (walletOnly) expect(mandate.cap_micros).toBe(5_000_000);
       await approveSandboxPopup(popup, {
         orderId: mandate.paypal_order_id,
         expectedUsd: (mandate.cap_micros / 1e6).toFixed(2),
@@ -329,6 +330,7 @@ const scenes = {
     expect(state.workspace_id).toBe(s3.workspaceId);
     expect(state.kind).toBe("judge");
     expect(state.mandate).toBeFalsy();
+    await page.getByLabel("Budget (USD)", {exact:true}).fill("5.00");
     await approve(page, state, mark, { walletOnly: true });
     const mandate = (await readState(page)).mandate;
     expect(mandate.cap_micros).toBe(5000000);

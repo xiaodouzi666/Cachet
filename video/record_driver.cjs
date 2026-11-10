@@ -61,7 +61,7 @@ function proof(req) {
     const p=spawn(process.env.CACHET_PYTHON || "python3",[path.join(__dirname,"soak_readback.py")],
       {cwd:root,stdio:["pipe","pipe","ignore"]});
     let out=""; p.stdout.on("data",c=>out+=c);
-    p.once("error",reject); p.once("exit",code=>{
+    p.once("error",reject); p.once("close",code=>{
       try { assert(code===0,"Original wallet authorization could not be verified with PayPal Sandbox GET.");resolve(JSON.parse(out)); }
       catch(e){reject(e);}
     });
