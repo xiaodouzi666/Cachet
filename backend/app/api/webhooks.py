@@ -90,8 +90,8 @@ def mandate_event(pp, event):
                 return False
             if m.status != "CLOSING":
                 transition(m, "CLOSING")
-            had_charges = m.captured_micros or m.accrued_uncaptured_micros
             ledger.forgive_at_close(db, m, final_minimum())
+            had_charges = m.captured_micros or ledger.written_off_micros(db, m.id)
             transition(m, "CLOSED" if had_charges else "VOIDED")
             return True
 
@@ -114,6 +114,10 @@ def money_event(pp, event):
         if remote.get("id") != rid or remote.get("status") not in allowed:
             return False
         amount = cents(remote["amount"])
+        if capture:
+            gross = remote["seller_receivable_breakdown"]
+            if cents(gross["net_amount"]) != amount - cents(gross["paypal_fee"]):
+                raise ValueError("PayPal capture fee and net amount differ from the gross capture")
         if capture and not row and op:
             final = op.payload["final"]
             reported_final = remote.get("final_capture")
