@@ -310,6 +310,17 @@ def capture_now(body: MandateAction, ws=wsdep):
     }
 
 
+class FaultCaptureRequest(MandateAction):
+    run_id: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/judge/fault-capture")
+def collect_fault_turns(body: FaultCaptureRequest, ws=wsdep):
+    with session_scope() as db:
+        throttle(db, ws, "capture")
+    return service.capture_fault_run(ws, body.mandate_id, body.run_id)
+
+
 @router.post("/judge/audit")
 def audit_now(body: MandateAction, ws=wsdep):
     with session_scope() as db:

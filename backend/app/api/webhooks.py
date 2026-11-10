@@ -146,7 +146,7 @@ def money_event(pp, event):
                 row = Capture(workspace_id=m.workspace_id, mandate_id=m.id, paypal_capture_id=rid,
                               status=remote["status"], amount_cents=amount, final=final,
                               fee_cents=cents(remote["seller_receivable_breakdown"]["paypal_fee"]))
-                ledger.record_capture(db, row)
+                ledger.record_capture(db, row, allocations=op.payload.get("allocations"))
                 if m.status == "CAPTURING":
                     transition(m, "ACTIVE")
                 op.result = {"id":rid}

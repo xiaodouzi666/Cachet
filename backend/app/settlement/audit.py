@@ -1,8 +1,10 @@
+from fastapi import HTTPException
 from sqlalchemy import select
 from backend.app import ledger
 from backend.app.api.access import owned
 from backend.app.db import session_scope
 from backend.app.models import AgentRun, Call, Capture, Mandate
+from backend.app.operations import Operation
 from backend.app.settlement.service import lock, refund_calls
 
 
@@ -11,6 +13,10 @@ def audit(ws, mandate_id, call_id=None, *, run_id=None):
     with lock(ws):
         with session_scope() as db:
             owned(db, Mandate, mandate_id, ws)
+            pending = db.scalar(select(Operation.id).where(Operation.subject == mandate_id,
+                                Operation.kind == "capture", Operation.result.is_(None)).limit(1))
+            if pending:
+                raise HTTPException(409, "Resume the prepared PayPal capture before auditing its call allocations")
             query = (
                 select(Call)
                 .join(AgentRun, AgentRun.id == Call.run_id)
