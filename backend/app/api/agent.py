@@ -14,6 +14,7 @@ from backend.app.agents.inference import live_turns
 from backend.app.agents.quote_reason import generate_reason, recorded_reason
 from backend.app.agents.tasks import TASKS, STEPS
 from backend.app.api.access import admin, client_ip, current_workspace, limit, owned
+from backend.app.api.access import admin as operator_admin
 from backend.app.api.catalog import chain, observed_live_call, pending_flush_id, warm_after_miss
 from backend.app.config import band_for, calibration, value
 from backend.app.db import session_scope
@@ -511,7 +512,7 @@ class SoakStep(BaseModel):
     sequence: int = Field(ge=1, le=soak.RUN_BUDGET)
 
 
-SOAK_AUTH = [Depends(soak.operator_token)]
+SOAK_AUTH = [Depends(operator_admin), Depends(soak.operator_token)]
 
 
 @router.get("/operator/soak-registration", dependencies=SOAK_AUTH)
