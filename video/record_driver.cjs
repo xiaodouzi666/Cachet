@@ -205,25 +205,31 @@ async function runRecorder(api,args) {
       try {
         if(opts.cleanup) { for(const c of cameras) await cleanup(c,browser,api); return; }
         for(const c of cameras){
-          let failed=false;
-          try {
-            for(const scene of regularOrder.filter(n=>opts.names.includes(n))){
-              const record=()=>recordNormal(c,scene,browser,api,opts);
-              if(scene==="S6"&&c.data.segments["S6-regular"]?.status!=="captured"){
-                const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
-                await fileLock(process.env.CACHET_GPU_LOCK||path.join(path.dirname(common),".cache/night-gpu.lock"),record);
-              } else await record();
+          const ordered=regularOrder.filter(scene=>opts.names.includes(scene));
+          const runCamera=async()=>{
+            let failed=false;
+            try {
+              for(const scene of ordered) await recordNormal(c,scene,browser,api,opts);
+            } catch(e) {
+              failed=true;
+              const failedScene=regularOrder.find(n=>["incomplete","recording"].includes(c.data.segments[n+"-regular"]?.status));
+              faults.push(failedScene==="S4"?"S4 wallet approval is incomplete. Inspect the isolated camera's private journal and release readback.":String(e.message).split("Call log:")[0]);
+            } finally {
+              if(failed||c.data.segments["S6-regular"]?.status==="captured") {
+                try { await cleanup(c,browser,api); } catch(e) { failed=true; faults.push(e.message); }
+              }
             }
-          }catch(e){
-            failed=true;
-            const failedScene=regularOrder.find(n=>["incomplete","recording"].includes(c.data.segments[n+"-regular"]?.status));
-            faults.push(failedScene==="S4"?"S4 wallet approval is incomplete. Inspect the isolated camera's private journal and release readback.":String(e.message).split("Call log:")[0]);
-          }
-          finally{
-            if(failed||c.data.segments["S6-regular"]?.status==="captured") {
-              try{await cleanup(c,browser,api);}catch(e){faults.push(e.message);}
-            }
-          }
+            return failed;
+          };
+          // The ordinary wallet, sponsor preparation, original run and global flush all use
+          // the shared GPU. Take exactly one lease per camera; S6 uses the enclosing lease.
+          const usesGpu=ordered.some(n=>changing.has(n)&&c.data.segments[n+"-regular"]?.status!=="captured");
+          let failed;
+          if(usesGpu){
+            const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
+            const lock=process.env.CACHET_GPU_LOCK||path.join(path.dirname(common),".cache/night-gpu.lock");
+            failed=await fileLock(lock,runCamera);
+          } else failed=await runCamera();
           if(failed&&!opts.allowPartial) break;
         }
         if(!faults.length||opts.allowPartial){

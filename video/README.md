@@ -28,7 +28,7 @@ python video/tts.py --models .cache/kokoro --from-take video/out/takes/d1/take-1
 python video/package.py video/out/takes/d1/take-1 video/out/takes/d1/take-2 --narration video/out/takes/d1/voice --output video/out/video_raw_1112
 ```
 
-Each regular S6 takes the recording server’s shared `.cache/night-gpu.lock` before flushing and honors the service’s cooldown. For worktrees the default lock is next to the primary checkout’s Git directory. Run the recorder directly to allow it to acquire and release this lock. A non-default installation can set `CACHET_GPU_LOCK`.
+Each paid ordinary take holds one lease on the recording server’s shared `.cache/night-gpu.lock` through publication, sponsor preparation, the ordinary agent runs, the S6 flush, and wallet release. The second take acquires its own lease. S6 honors the service’s cooldown inside that lease. For worktrees the default lock is next to the primary checkout’s Git directory. Run the recorder directly to allow it to acquire and release this lock. A non-default installation can set `CACHET_GPU_LOCK`.
 
 The original source videos, stills, timestamps, cookie state, camera manifests and paired receipts stay under the session’s private directory. Keep the separate soak journal and its action sidecars on the operator host. Rerun with the **same session** to skip complete segments. If a wallet scene is interrupted, its available camera footage is retained and the recorder attempts release of that workspace’s original authorization. `--cleanup --session ...` retries only the regular wallets’ release and provider readback. Keep the original production/rehearsal flag. An interrupted, unfilmed payment is reported as incomplete. A resumed readback may document its outcome.
 
