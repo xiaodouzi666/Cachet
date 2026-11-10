@@ -392,13 +392,14 @@ def propose(ws, call_id):
             proposal_id=identifier,
             call_id=c.id,
             mandate_id=m,
+            estimated_refund_cents=refundable,
             description=description,
             status="pending",
             expires_at=(utcnow() + timedelta(minutes=15)).timestamp(),
         )
         db.add(Control(key=f"refund-proposal:{ws}:{identifier}", data=data))
         return [], {
-            k: data[k] for k in ("proposal_id", "call_id", "mandate_id", "description")
+            k: data[k] for k in ("proposal_id", "call_id", "mandate_id", "estimated_refund_cents", "description")
         }
 
 

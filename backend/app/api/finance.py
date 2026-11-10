@@ -43,7 +43,7 @@ from backend.app.gateway.modes import health
 from backend.app.paypal.reconciliation import reconcile
 from backend.app.settlement import service
 from backend.app.settlement.audit import audit
-from backend.app.settlement.payout_job import settle
+from backend.app.settlement.payout_job import allocation, settle
 
 router = APIRouter(prefix="/api", dependencies=[Depends(gateway)])
 router.include_router(seed.router)
@@ -318,7 +318,16 @@ def audit_now(body: MandateAction, ws=wsdep):
     return audit(ws, body.mandate_id)
 
 
+@router.get("/judge/settle")
+def settlement_preview(ws=wsdep):
+    with session_scope(write=False) as db:
+        if db.get(Workspace, ws).kind != "judge":
+            raise HTTPException(403, "This control requires a judge workspace")
+        return allocation(db, ws)[2]
+
+
 class SettlementRequest(BaseModel):
+    quote_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     batch_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
@@ -326,7 +335,7 @@ class SettlementRequest(BaseModel):
 def settle_now(body: SettlementRequest | None = None, ws=wsdep):
     with session_scope() as db:
         throttle(db, ws, "settle")
-    return settle(ws, body.batch_id if body else None)
+    return settle(ws, body.batch_id if body else None, quote_id=body.quote_id if body else None)
 
 
 def listing(model, names, ws):
