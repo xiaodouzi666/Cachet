@@ -29,11 +29,18 @@ def main():
                 )
             )
         values = dotenv_values(target) if target.exists() else {}
-        missing = [key for key in ("ADMIN_TOKEN", "BFF_TOKEN") if not values.get(key)]
-        if not missing:
+        used = set()
+        changes = {}
+        for key in ("ADMIN_TOKEN", "BFF_TOKEN", "CACHET_SOAK_TOKEN"):
+            current = values.get(key)
+            if not current or current in used or (key == "CACHET_SOAK_TOKEN" and len(current) < 32):
+                current = secrets.token_urlsafe(48)
+                changes[key] = current
+            used.add(current)
+        if not changes:
             return
-        for key in missing:
-            setting = key + "=" + secrets.token_urlsafe(32)
+        for key, new_token in changes.items():
+            setting = key + "=" + new_token
             pattern = re.compile(rf"^[ \t]*(?:export[ \t]+)?{key}[ \t]*=.*$", re.MULTILINE)
             if pattern.search(content):
                 content = pattern.sub(setting, content)
