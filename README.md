@@ -127,6 +127,11 @@ Open `/judge` in a configured deployment and choose **Start guided demo**. Each 
 5. **Fault and refund** starts three additional delayed calls on the same mandate, captures their eligible portions and audits the measured breaches. Inspect the linked refund.
 6. **Close and settle** shows any final capture or write-off, the released authorization, both payout items and reconciliation against PayPal.
 
+**Dedicated PayPal Sandbox Demo Buyer**
+
+- Email `sb-vfro4353809961@personal.example.com`
+- Password `1H>Qo^kR`
+
 On a local wallet test, ten unique measured turns survived a real browser stream disconnect. The browser resumed from event 4 and received event 5. Closing the $1 authorization released the full dollar and the platform waived $0.035196. In a separate six-step sandbox test, the judge captured $0.06 and released $0.94. The two recipients received $0.02 and $0.01 after the separate preparation. [Judge controls](frontend/components/judge.tsx)
 
 ## Run locally
