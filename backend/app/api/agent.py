@@ -13,7 +13,7 @@ from backend.app.agents.anomaly import payer_key, same_payer_layers
 from backend.app.agents.inference import live_turns
 from backend.app.agents.quote_reason import generate_reason, recorded_reason
 from backend.app.agents.tasks import TASKS, STEPS
-from backend.app.api.access import admin, client_ip, current_workspace, limit, owned
+from backend.app.api.access import gateway, client_ip, current_workspace, limit, owned
 from backend.app.api.catalog import chain, observed_live_call, pending_flush_id, warm_after_miss
 from backend.app.config import band_for, calibration, value
 from backend.app.db import session_scope
@@ -35,7 +35,7 @@ from backend.app.operations import Control, RunEvent
 from backend.app.replay.recordings import application_evidence, load
 from backend.app.settlement.service import capture, ensure_payer_link, lock
 
-router = APIRouter(prefix="/api", dependencies=[Depends(admin)])
+router = APIRouter(prefix="/api", dependencies=[Depends(gateway)])
 wsdep = Depends(current_workspace)
 slots = threading.BoundedSemaphore(2)
 

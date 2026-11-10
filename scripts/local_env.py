@@ -18,9 +18,6 @@ def main():
     try:
         fcntl.flock(directory, fcntl.LOCK_EX)
         if target.exists():
-            if dotenv_values(target).get("ADMIN_TOKEN"):
-                print("Using the existing project .env.")
-                return
             content = target.read_text()
         else:
             content = (
@@ -31,14 +28,17 @@ def main():
                     "DATABASE_URL=sqlite:///./.data/cachet.db",
                 )
             )
-        setting = "ADMIN_TOKEN=" + secrets.token_urlsafe(32)
-        pattern = re.compile(
-            r"^[ \t]*(?:export[ \t]+)?ADMIN_TOKEN[ \t]*=.*$", re.MULTILINE
-        )
-        if pattern.search(content):
-            content = pattern.sub(setting, content)
-        else:
-            content = content.rstrip("\n") + "\n" + setting + "\n"
+        values = dotenv_values(target) if target.exists() else {}
+        missing = [key for key in ("ADMIN_TOKEN", "BFF_TOKEN") if not values.get(key)]
+        if not missing:
+            return
+        for key in missing:
+            setting = key + "=" + secrets.token_urlsafe(32)
+            pattern = re.compile(rf"^[ \t]*(?:export[ \t]+)?{key}[ \t]*=.*$", re.MULTILINE)
+            if pattern.search(content):
+                content = pattern.sub(setting, content)
+            else:
+                content = content.rstrip("\n") + "\n" + setting + "\n"
         with tempfile.NamedTemporaryFile(
             mode="w", dir=ROOT, delete=False, prefix=".env."
         ) as handle:

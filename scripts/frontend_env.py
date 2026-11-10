@@ -12,7 +12,7 @@ if values.get("AG_STUDIO_LICENSE_KEY"):
         "NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY", values["AG_STUDIO_LICENSE_KEY"]
     )
 for key in (
-    "ADMIN_TOKEN",
+    "BFF_TOKEN",
     "CACHET_API_URL",
     "PUBLIC_API_URL",
     "PUBLIC_WEB_URL",
@@ -22,4 +22,10 @@ for key in (
 ):
     if values.get(key):
         os.environ.setdefault(key, values[key])
-os.execvp(sys.argv[1], sys.argv[1:])
+# Do not let operator or payment credentials inherited from the launching shell
+# enter the web service. Retain host settings needed to run Node and npm.
+allowed = {"BFF_TOKEN", "CACHET_API_URL", "PUBLIC_API_URL", "PUBLIC_WEB_URL",
+           "CACHET_TRUSTED_CLIENT_IP_HEADER", "NEXT_PUBLIC_PAYPAL_CLIENT_ID",
+           "NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY", "HOME", "PATH", "LANG", "LC_ALL",
+           "TMPDIR", "NODE_ENV", "NEXT_TELEMETRY_DISABLED"}
+os.execvpe(sys.argv[1], sys.argv[1:], {k: v for k, v in os.environ.items() if k in allowed})

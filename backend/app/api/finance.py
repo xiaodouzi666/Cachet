@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from backend.app import marketplace
 from backend.app.api.access import (
-    admin,
+    gateway,
     client_ip,
     current_workspace,
     digest,
@@ -44,7 +44,7 @@ from backend.app.settlement import service
 from backend.app.settlement.audit import audit
 from backend.app.settlement.payout_job import settle
 
-router = APIRouter(prefix="/api", dependencies=[Depends(admin)])
+router = APIRouter(prefix="/api", dependencies=[Depends(gateway)])
 router.include_router(seed.router)
 wsdep = Depends(current_workspace)
 

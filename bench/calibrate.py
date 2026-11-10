@@ -7,7 +7,7 @@ from pathlib import Path
 
 from bench.ttft_bench import ROOT, Engine, benchmark
 
-RESULT = ROOT / "bench/results/calibration.json"
+RESULT = (ROOT / "bench/results/calibration.json").resolve()
 PLOT = ROOT / "bench/plots/prefix-latency.png"
 
 

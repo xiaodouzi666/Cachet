@@ -17,6 +17,15 @@ def admin(x_admin_token: str | None = Header(default=None)):
         raise HTTPException(403, "This action requires the trusted application gateway")
 
 
+def gateway(x_gateway_token: str | None = Header(default=None),
+            x_admin_token: str | None = Header(default=None)):
+    """Workspace routes also accept the web service's limited credential."""
+    expected = value("BFF_TOKEN")
+    if expected and x_gateway_token and secrets.compare_digest(x_gateway_token, expected):
+        return
+    admin(x_admin_token)
+
+
 def digest(secret):
     return hashlib.sha256(secret.encode()).hexdigest()
 

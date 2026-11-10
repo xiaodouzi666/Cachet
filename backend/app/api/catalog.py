@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from backend.app import marketplace
-from backend.app.api.access import admin, current_workspace, owned
+from backend.app.api.access import gateway, current_workspace, owned
 from backend.app.config import calibration, manifest, sources, value
 from backend.app.db import session_scope
 from backend.app.models import Context, Publisher
@@ -21,7 +21,7 @@ from backend.app.gateway.prompt_builder import Prefix
 from backend.app.gateway.quote import quote
 from backend.app.gateway.sglang_client import Engine
 
-router = APIRouter(prefix="/api", dependencies=[Depends(admin)])
+router = APIRouter(prefix="/api", dependencies=[Depends(gateway)])
 wsdep = Depends(current_workspace)
 
 
