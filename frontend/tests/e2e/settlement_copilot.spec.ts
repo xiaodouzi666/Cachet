@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 const stateFile = process.env.CACHET_COPILOT_STATE;
@@ -38,6 +39,12 @@ test("answers the judge's three questions through the Studio agent and confirms 
     expect(response.ok()).toBeTruthy();
     return response.json();
   }
+  const evidenceDir = process.env.CACHET_COPILOT_EVIDENCE_DIR;
+  async function captureEvidence(name: string) {
+    if (!evidenceDir) return;
+    mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
+    await page.screenshot({ path: join(evidenceDir, name + ".png") });
+  }
   const state = await read("judge/state");
   expect(state.workspace_id).toBe(journal.workspace_id);
   const mandate = mandateId || state.mandate?.id;
@@ -69,13 +76,16 @@ test("answers the judge's three questions through the Studio agent and confirms 
   for (const id of publisherIds) {
     await expect(page.getByText(id, { exact: false }).first()).toBeVisible();
   }
+  await captureEvidence("weekly-royalties");
   await question(page, `Where did the money from mandate ${mandate} go?`, "mandate_breakdown");
   await expect(page.getByText(owned[0].paypal_capture_id, { exact: false }).first()).toBeVisible();
+  await captureEvidence("mandate-breakdown");
   if (existingReceipt) {
     // Resume an acknowledged confirmation without selecting another charge.
     await page.getByRole("button", { name: "Refunds", exact: true }).click();
     await expect(page.locator(".ag-cell").filter({ hasText: existingReceipt.paypal_refund_id }).first()).toBeVisible();
     expect((await read("reconcile")).ok).toBe(true);
+    await captureEvidence("refund-grid-readback");
     return;
   }
   let selected = "";
@@ -93,6 +103,7 @@ test("answers the judge's three questions through the Studio agent and confirms 
   }
   expect(selected, "No remaining whole-cent PayPal entitlement among the prepared calls").toBeTruthy();
   expect(await read("refunds")).toEqual(before);
+  await captureEvidence("refund-proposal");
   writeFileSync(journalPath + ".tmp", JSON.stringify({ workspace: journal.workspace_id, mandate, call: selected }), { mode: 0o600 });
   renameSync(journalPath + ".tmp", journalPath);
   await page.getByRole("button", { name: "Confirm sandbox refund" }).click();
@@ -105,5 +116,6 @@ test("answers the judge's three questions through the Studio agent and confirms 
     r.call_ids_json.includes(selected) && !priorIds.has(r.paypal_refund_id));
   expect(refunds).toHaveLength(1);
   await expect(page.locator("pre.receipt").last()).toContainText(refunds[0].paypal_refund_id);
+  await captureEvidence("confirmed-sandbox-refund");
   expect((await read("reconcile")).ok).toBe(true);
 });
