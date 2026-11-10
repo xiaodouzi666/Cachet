@@ -1,4 +1,5 @@
 """Capture the five SLA length bands and fit cold prefill cost from real GPU calls."""
+import argparse
 import json
 import math
 import subprocess
@@ -7,6 +8,7 @@ from pathlib import Path
 
 from backend.app.gateway.calibration import fit
 from bench.ttft_bench import ROOT, Engine, benchmark
+from scripts.gpu_lease import gpu_lease
 
 RESULT = (ROOT / "bench/results/calibration.json").resolve()
 PLOT = ROOT / "bench/plots/prefix-latency.png"
@@ -31,7 +33,7 @@ def render(data):
         draw.text((left-20,yy),f"{10**n:,}",font=font(25),fill="#374151",anchor="rm")
     draw.text((110,245),"Milliseconds · logarithmic scale",font=font(26),fill="#374151")
     for j, (field, color, label) in enumerate((("cold_p50_ms","#374151","Cold"),("warm_p50_ms","#0f766e","Warm"))):
-        points = [(left+i*(right-left)/4,y(b[field])) for i,b in enumerate(data["bands"])]
+        points = [(left+i*(right-left)/(len(data['bands'])-1),y(b[field])) for i,b in enumerate(data["bands"])]
         draw.line(points,fill=color,width=7)
         for (xx,yy),band in zip(points,data["bands"]):
             draw.ellipse((xx-9,yy-9,xx+9,yy+9),fill=color)
@@ -39,14 +41,20 @@ def render(data):
             if j==0:
                 draw.text((xx,bottom+24),f"{band['prefix_tokens']//1000}k",anchor="mt",font=font(29),fill="#111827")
         draw.text((1400+j*185,242),label,font=font(32),fill=color)
-    draw.text((110,970),"Client-observed median of five cold/warm pairs per length. Each pair begins with a verified cache flush.",font=font(27),fill="#374151")
+    pairs = len(data["bands"][0]["runs"])
+    draw.text((110,970),f"Client-observed median of {pairs} cold/warm pairs per length. Each pair begins with a verified cache flush.",font=font(27),fill="#374151")
     PLOT.parent.mkdir(exist_ok=True)
     im.save(PLOT)
 
 
 def main():
-    with Engine() as engine:
-        bands = [benchmark(engine, n, 5) for n in (2000, 4000, 8000, 16000, 26000)]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reduced", action="store_true", help="Measure three lengths using three cold/warm pairs each.")
+    args = parser.parse_args()
+    lengths = (2000, 8000, 26000) if args.reduced else (2000, 4000, 8000, 16000, 26000)
+    trials = 3 if args.reduced else 5
+    with gpu_lease(), Engine() as engine:
+        bands = [benchmark(engine, n, trials) for n in lengths]
         meta = engine.get("/server_info").raise_for_status().json()
     record = {
         "measured_at": datetime.now(timezone.utc).isoformat(), "bands": bands, "fit": fit(bands),

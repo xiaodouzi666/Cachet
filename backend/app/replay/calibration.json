@@ -1,0 +1,353 @@
+{
+  "measured_at": "2026-11-09T05:51:02.981142+00:00",
+  "bands": [
+    {
+      "prefix_tokens": 2000,
+      "prompt_tokens": 2017,
+      "runs": [
+        {
+          "cold": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 0,
+            "ttft_ms": 387.059
+          },
+          "warm": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 2016,
+            "ttft_ms": 28.289
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 0,
+            "ttft_ms": 380.244
+          },
+          "warm": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 2016,
+            "ttft_ms": 27.93
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 0,
+            "ttft_ms": 385.218
+          },
+          "warm": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 2016,
+            "ttft_ms": 27.799
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 0,
+            "ttft_ms": 382.956
+          },
+          "warm": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 2016,
+            "ttft_ms": 27.417
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 0,
+            "ttft_ms": 383.823
+          },
+          "warm": {
+            "prompt_tokens": 2017,
+            "cached_tokens": 2016,
+            "ttft_ms": 27.765
+          }
+        }
+      ],
+      "cold_p50_ms": 383.823,
+      "warm_p50_ms": 27.799
+    },
+    {
+      "prefix_tokens": 4000,
+      "prompt_tokens": 4017,
+      "runs": [
+        {
+          "cold": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 0,
+            "ttft_ms": 782.744
+          },
+          "warm": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 4016,
+            "ttft_ms": 27.828
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 0,
+            "ttft_ms": 778.444
+          },
+          "warm": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 4016,
+            "ttft_ms": 28.228
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 0,
+            "ttft_ms": 785.416
+          },
+          "warm": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 4016,
+            "ttft_ms": 27.669
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 0,
+            "ttft_ms": 779.01
+          },
+          "warm": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 4016,
+            "ttft_ms": 27.815
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 0,
+            "ttft_ms": 785.841
+          },
+          "warm": {
+            "prompt_tokens": 4017,
+            "cached_tokens": 4016,
+            "ttft_ms": 30.013
+          }
+        }
+      ],
+      "cold_p50_ms": 782.744,
+      "warm_p50_ms": 27.828
+    },
+    {
+      "prefix_tokens": 8000,
+      "prompt_tokens": 8017,
+      "runs": [
+        {
+          "cold": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 0,
+            "ttft_ms": 1746.908
+          },
+          "warm": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 8016,
+            "ttft_ms": 29.117
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 0,
+            "ttft_ms": 1739.759
+          },
+          "warm": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 8016,
+            "ttft_ms": 29.177
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 0,
+            "ttft_ms": 1742.379
+          },
+          "warm": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 8016,
+            "ttft_ms": 29.162
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 0,
+            "ttft_ms": 1744.555
+          },
+          "warm": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 8016,
+            "ttft_ms": 29.187
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 0,
+            "ttft_ms": 1743.186
+          },
+          "warm": {
+            "prompt_tokens": 8017,
+            "cached_tokens": 8016,
+            "ttft_ms": 29.242
+          }
+        }
+      ],
+      "cold_p50_ms": 1743.186,
+      "warm_p50_ms": 29.177
+    },
+    {
+      "prefix_tokens": 16000,
+      "prompt_tokens": 16017,
+      "runs": [
+        {
+          "cold": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 0,
+            "ttft_ms": 4153.236
+          },
+          "warm": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 16016,
+            "ttft_ms": 47.035
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 0,
+            "ttft_ms": 4157.585
+          },
+          "warm": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 16016,
+            "ttft_ms": 46.82
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 0,
+            "ttft_ms": 4159.759
+          },
+          "warm": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 16016,
+            "ttft_ms": 47.969
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 0,
+            "ttft_ms": 4180.333
+          },
+          "warm": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 16016,
+            "ttft_ms": 47.029
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 0,
+            "ttft_ms": 4205.56
+          },
+          "warm": {
+            "prompt_tokens": 16017,
+            "cached_tokens": 16016,
+            "ttft_ms": 47.581
+          }
+        }
+      ],
+      "cold_p50_ms": 4159.759,
+      "warm_p50_ms": 47.035
+    },
+    {
+      "prefix_tokens": 26000,
+      "prompt_tokens": 26017,
+      "runs": [
+        {
+          "cold": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 0,
+            "ttft_ms": 8321.522
+          },
+          "warm": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 26016,
+            "ttft_ms": 70.241
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 0,
+            "ttft_ms": 8408.036
+          },
+          "warm": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 26016,
+            "ttft_ms": 69.011
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 0,
+            "ttft_ms": 8431.807
+          },
+          "warm": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 26016,
+            "ttft_ms": 69.21
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 0,
+            "ttft_ms": 8436.62
+          },
+          "warm": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 26016,
+            "ttft_ms": 69.045
+          }
+        },
+        {
+          "cold": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 0,
+            "ttft_ms": 8498.442
+          },
+          "warm": {
+            "prompt_tokens": 26017,
+            "cached_tokens": 26016,
+            "ttft_ms": 69.076
+          }
+        }
+      ],
+      "cold_p50_ms": 8431.807,
+      "warm_p50_ms": 69.076
+    }
+  ],
+  "fit": {
+    "alpha": 0.16562719206782167,
+    "beta": 6.081506508765874e-06,
+    "units": "milliseconds, tokens"
+  },
+  "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+  "sglang": "0.5.23",
+  "gpu": "NVIDIA GeForce RTX 3090 Ti"
+}
