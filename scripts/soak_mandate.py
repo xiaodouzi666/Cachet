@@ -36,7 +36,7 @@ def save_snapshot(journal, path, snapshot):
 
 def targets_met(s):
     return (s["threshold_captures"] >= 2 and s["fault_turns"] == 6 and bool(s["fault_refund_ids"])
-            and len(s["publisher_payable_micros"]) == 2 and min(s["publisher_payable_micros"].values()) >= 250_000)
+            and len(s["publisher_available_micros"]) == 2 and min(s["publisher_available_micros"].values()) >= 250_000)
 
 
 def run(args):

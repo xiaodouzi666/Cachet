@@ -13,3 +13,6 @@ From the server checkout, run the driver in a tmux session. The default API orig
 ```
 
 The initial window lasts up to three hours or $4.20 of captured and pending charges. Six delayed live turns are scheduled near a normal threshold capture. The driver requests an ordinary SLA audit after the capture includes delayed shared charges. The final report contains the provider authorization disposition, capture fees, refund IDs and reconciliation. The mandate remains open for the recording. If the C2 targets are still outstanding, an explicit continuation opens another bounded window and retains $0.25 of authorization headroom. The recording operator closes and settles through the normal judge controls.
+
+
+The C2 publisher target uses `publisher_available_micros` for **each** recipient, from the same eligibility calculation that creates the payout. `publisher_payable_micros` is the signed book balance. A positive difference includes accrued royalties awaiting funding or reserved in a pending payout. If refunds after a previous payout leave a negative book balance, `publisher_offset_micros` shows the future earnings needed to clear it. Available balances are always nonnegative.
