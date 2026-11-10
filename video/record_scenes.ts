@@ -43,6 +43,7 @@ async function publishLayers(
       await page.getByLabel("Parent context").selectOption(parent.id);
       await expect(page.getByLabel("Parent context")).toHaveValue(parent.id);
     }
+    await mark(slug + "-source-and-parent");
     await page
       .getByRole("button", {
         name: replay ? "Register for replay" : "Publish and warm",
@@ -355,6 +356,9 @@ const scenes = {
     await expect(rows.first()).toBeVisible({timeout: 120000});
     await rows.first().scrollIntoViewIfNeeded();
     await mark("first-metered-turn");
+    await expect(rows.nth(3)).toBeVisible({timeout:120000});
+    await rows.nth(3).scrollIntoViewIfNeeded();
+    await mark("live-call-metering");
     await completedTurns(page, mark, runId);
     const turns = await readRunTurns(page, runId);
     expect(turns).toHaveLength(10);
@@ -414,7 +418,17 @@ const scenes = {
     await completedTurns(page, quietMark, coldRun);
     await go("/judge");
     await step(5).click();
-    await page.getByRole("button",{name:"Inject three delays, capture and audit (test)",exact:true}).click();
+    const postTo = route => response => response.request().method()==="POST" && new URL(response.url()).pathname===route;
+    const auditObserved = page.waitForResponse(postTo("/api/judge/fault-audit"),{timeout:240000}).catch(()=>null);
+    const [faultStart] = await Promise.all([
+      page.waitForResponse(postTo("/api/judge/fault-run")),
+      page.getByRole("button",{name:"Inject three delays, capture and audit (test)",exact:true}).click(),
+    ]);
+    expect(faultStart.ok()).toBe(true);
+    await mark("three-delays-submitted");
+    const auditReply=await auditObserved;
+    expect(auditReply?.ok()).toBe(true);
+    await mark("live-fault-audit");
     await expect(step(5)).toHaveAttribute("data-complete","true",{timeout:240000});
     const guide=await readJson(page,"judge/walkthrough");
     expect(guide.followup.mandate_id).toBe(s5.mandateId);
