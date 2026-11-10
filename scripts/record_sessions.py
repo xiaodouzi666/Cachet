@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scripts.check_generated_apps import assess_record, proposal_feedback
 from backend.app.agents.inference import live_turns
+from backend.app.agents.quote_reason import canonical_quote
 from backend.app.agents.tasks import MAX_OUTPUT_TOKENS, STEPS, TASKS
 from backend.app.config import manifest
 from backend.app.gateway.prompt_builder import Prefix
@@ -39,7 +40,7 @@ def capture(engine, task_id, buy, model, *, public_salt=None):
         raise ValueError("Warm probe missed its threshold")
     # Only public archive salts enter these recordings.
     tenant = public_salt if public_salt is not None else secrets.token_hex(4)
-    q = quote(sum(len(ids) for _, ids in prefix.layers), len(STEPS), 0.25 if buy else 0)
+    q = canonical_quote(quote(sum(len(ids) for _, ids in prefix.layers), len(STEPS), 0.25 if buy else 0))
     results = live_turns(
         engine,
         prefix,

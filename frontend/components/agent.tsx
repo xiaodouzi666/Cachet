@@ -466,12 +466,12 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
               <div>
                 <small>Buy shared context</small>
                 <strong>{usd(quote.buy_micros)}</strong>
-                <small>Warm TTFT · {latency(quote.warm_ttft_ms)}</small>
+                <small>Expected TTFT · {latency(quote.buy_ttft_ms ?? quote.warm_ttft_ms)}</small>
               </div>
               <div>
                 <small>Compute independently</small>
                 <strong>{usd(quote.compute_micros)}</strong>
-                <small>Cold TTFT · {latency(quote.cold_ttft_ms)}</small>
+                <small>{quote.compute_ttft_ms == null ? "Cold TTFT" : "Expected TTFT"} · {latency(quote.compute_ttft_ms ?? quote.cold_ttft_ms)}</small>
               </div>
             </div>
             {quote.reason && <p>{quote.reason}</p>}

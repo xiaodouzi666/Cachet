@@ -78,6 +78,8 @@ export type Quote = {
   compute_micros: number;
   cold_ttft_ms: number | null;
   warm_ttft_ms: number | null;
+  buy_ttft_ms?: number;
+  compute_ttft_ms?: number;
   reason?: string;
 };
 export type DecisionExplanation = {

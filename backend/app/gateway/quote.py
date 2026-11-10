@@ -13,12 +13,16 @@ def quote(tokens, turns, cold_fraction, profile=None):
     )
     shared = amount * Decimal(value("PRICE_SHARED", "0.15"))
     band = band_for(tokens, profile)
+    warm_ms = Decimal(str(band["warm_p50_ms"]))
+    cold_ms = Decimal(str(band["cold_p50_ms"]))
     return {
         "decision": "buy" if shared <= baseline else "compute",
         "buy_micros": int(shared.to_integral_value(rounding=ROUND_HALF_UP)),
         "compute_micros": int(baseline.to_integral_value(rounding=ROUND_HALF_UP)),
         "cold_ttft_ms": band["cold_p50_ms"],
         "warm_ttft_ms": band["warm_p50_ms"],
+        "buy_ttft_ms": float(warm_ms),
+        "compute_ttft_ms": float(cold * cold_ms + (1 - cold) * warm_ms),
         "tokens": tokens,
         "turns": turns,
         "cold_fraction": float(cold),
