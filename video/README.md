@@ -25,6 +25,6 @@ Run `python video/tts.py` inside that environment. The program writes eight mono
 
 ## Production takes and handoff
 
-Export `CACHET_WEB_URL` with the real HTTPS deployment origin. Run `node video/record_scenes.ts` twice. Each run prints its take directory. With FFmpeg and FFprobe on the path, run `python video/package.py FIRST_TAKE SECOND_TAKE --output video/out/video_raw.zip`, substituting the two actual directories. Packaging checks every required scene, both distinct takes, screenshot timestamps, resolution, narration checksums and the 400 MB limit.
+Export `CACHET_WEB_URL` with the real HTTPS deployment origin. Run `node video/record_scenes.ts` twice. Each run prints its take directory. With FFmpeg and FFprobe on the path, run `python video/package.py FIRST_TAKE SECOND_TAKE --output video/out/video_raw_1112`, substituting the two actual directories. The output directory contains both 1080p takes, key frames, a combined timeline, 24 kHz narration, the benchmark plot, and the GPU buy/compute comparison. The 300 MB limit applies to the uncompressed files.
 
 Use `python video/edit.py TAKE --output video/out/cachet.mp4` for a first cut from a completed production take, or add `--preview` for a rehearsal. The edit carries selectable English captions, AAC audio and a 1080p H.264 stream. The final video and the public upload still need review against the live product and the event rules.

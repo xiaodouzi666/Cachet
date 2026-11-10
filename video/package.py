@@ -3,6 +3,8 @@
 import argparse
 import hashlib
 import json
+import shutil
+import struct
 import subprocess
 import wave
 from pathlib import Path
@@ -76,12 +78,14 @@ def main():
     if args.takes[0].resolve() == args.takes[1].resolve():
         parser.error("Two separate takes are required")
     source = None
+    timelines = {}
     files = {}
     for index, directory in enumerate(args.takes, start=1):
         origin, contents = inspect_take(directory)
         if source and source != origin:
             raise ValueError("Both takes must show the same site")
         source = origin
+        timelines[f"take-{index}"] = json.loads(contents["timeline.json"].read_text())["scenes"]
         files.update({f"take-{index}/{k}": v for k, v in contents.items()})
     durations = args.narration / "durations.json"
     files["narration/durations.json"] = durations
@@ -106,20 +110,45 @@ def main():
                 raise ValueError(f"Voiceover outside the target for {name}")
         files[f"narration/{wav.name}"] = wav
         files[f"narration/{script.name}"] = script
-    files["bench/prefix-latency.png"] = ROOT / "bench/plots/prefix-latency.png"
+    chart = ROOT / "bench/plots/prefix-latency.png"
+    with chart.open("rb") as handle:
+        header = handle.read(24)
+    if header[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", header[16:24]) != (1920, 1080):
+        raise ValueError("Expected a 1920 by 1080 benchmark PNG")
+    files["bench/plots/prefix-latency.png"] = chart
+    contrast = ROOT / "bench/results/contrast.json"
+    runs = json.loads(contrast.read_text())["runs"]
+    if {run["decision"] for run in runs} != {"buy", "compute"} or any(
+        not run["turns"] for run in runs
+    ):
+        raise ValueError("Expected measured buy and compute runs")
+    files["contrast.json"] = contrast
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=args.output.parent) as tmp:
-        archive = Path(tmp) / "raw.zip"
-        with ZipFile(archive, "w", ZIP_DEFLATED, compresslevel=4) as output:
-            for name, path in sorted(files.items()):
-                output.write(path, name)
-        if archive.stat().st_size >= 400_000_000:
-            raise ValueError("Footage archive is over the 400 MB limit")
-        with ZipFile(archive) as check:
-            if check.testzip():
-                raise ValueError("Archive failed CRC verification")
-        archive.replace(args.output)
-    print(f"Verified {len(files)} files in {args.output}")
+        stage = Path(tmp) / "footage"
+        stage.mkdir()
+        manifest = stage / "timeline.json"
+        manifest.write_text(json.dumps({"origin": source, "takes": timelines}, indent=2) + "\n")
+        inputs = {**files, "timeline.json": manifest}
+        size = sum(path.stat().st_size for path in inputs.values())
+        if size >= 300_000_000:
+            raise ValueError(f"Footage totals {size:,} bytes. The limit is 300 MB.")
+        if args.output.suffix == ".zip":
+            archive = Path(tmp) / "raw.zip"
+            with ZipFile(archive, "w", ZIP_DEFLATED, compresslevel=4) as output:
+                for name, path in sorted(inputs.items()):
+                    output.write(path, name)
+            with ZipFile(archive) as check:
+                if check.testzip():
+                    raise ValueError("Archive failed CRC verification")
+            archive.replace(args.output)
+        else:
+            for name, path in files.items():
+                dest = stage / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, dest)
+            stage.rename(args.output)
+    print(f"Verified {len(inputs)} files, {size:,} bytes in {args.output}")
 
 
 if __name__ == "__main__":
