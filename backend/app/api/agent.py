@@ -303,7 +303,7 @@ def execute(ws, identifier, context_id, tenant):
             checked_track = None
             engine = Engine(mode) if mode in {"live", "hosted"} else None
             try:
-                profile = checked_profile(engine) if mode == "hosted" else calibration()
+                profile = checked_profile(engine) if mode == "hosted" else calibration(mode)
                 if (
                     mode == "hosted"
                     and fingerprint(profile) != config["calibration_id"]

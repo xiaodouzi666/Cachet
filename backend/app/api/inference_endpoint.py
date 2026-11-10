@@ -27,3 +27,15 @@ def current_endpoint():
     state = registration.record() if registration.enabled() else {}
     return {"live": bool(state and registration.active()),
             **{k: state[k] for k in ("url", "gpu", "model", "sglang_version", "seen_at", "checked_at") if k in state}}
+
+
+@router.post("/api/admin/inference-calibration", dependencies=[Depends(admin)])
+def calibrate_transport():
+    from backend.app.gateway.route_calibration import start
+    return start()
+
+
+@router.get("/api/admin/inference-calibration", dependencies=[Depends(admin)])
+def calibration_status():
+    from backend.app.gateway.route_calibration import read
+    return read()
