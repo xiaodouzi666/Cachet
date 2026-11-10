@@ -82,6 +82,10 @@ test("uses the real API through isolated browser workspaces and the settlement d
   await expect(
     page.getByRole("heading", { name: "Prefix Royalty Tree" }),
   ).toBeVisible();
+  const system = await (await page.request.get("/api/royalties/system")).json();
+  const systemNode = page.locator(".royalty-widget li > div").filter({ hasText: "P0 · System" });
+  await expect(systemNode).toContainText(`${system.hit_tokens.toLocaleString("en-US")} workspace hits`);
+  await expect(page.getByText(/Publisher payables use Shapley/)).toBeVisible();
   await page.getByRole("button", { name: "Linear", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Linear", exact: true }),
@@ -89,7 +93,7 @@ test("uses the real API through isolated browser workspaces and the settlement d
   const statements = page.getByRole("navigation", {
     name: "Settlement statements",
   });
-  for (const tab of ["Ledger", "Captures", "Refunds", "Payout batches"]) {
+  for (const tab of ["Ledger", "Captures", "Refunds", "Payout batches", "PayPal events"]) {
     await statements.getByRole("button", { name: tab }).click();
     await expect(statements.getByRole("button", { name: tab })).toHaveAttribute(
       "aria-current",
