@@ -25,8 +25,9 @@ export default function Home() {
             <em>fairly paid.</em>
           </h1>
           <p>
-            Coding agents answer faster by reusing code already loaded on a GPU.
-            Maintainers earn a PayPal royalty when their code is reused.
+            Developers pay through PayPal so their coding agents can reuse code
+            already loaded on a GPU. Agents get faster answers, and maintainers
+            earn a royalty on verified cache hits.
           </p>
           <div className="actions">
             <ActionLink href="/judge">Start guided demo</ActionLink>
