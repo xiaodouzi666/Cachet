@@ -1,5 +1,5 @@
 from backend.app.agents.tasks import MAX_OUTPUT_TOKENS, STEPS, requests_module, turn_question
-from backend.app.config import manifest
+from backend.app.agents.window import window_prompt
 from backend.app.gateway.prompt_builder import token_hash
 
 
@@ -29,9 +29,7 @@ def live_turns(
         )
         http_feedback = None
         messages.append(("user", question))
-        prompt = prefix.build(engine, owners, tenant, messages, buy)
-        if len(prompt.ids) + max_output > manifest()["context_window"]:
-            raise ValueError("The conversation exceeds the model window")
+        prompt = window_prompt(engine, prefix, owners, tenant, messages, buy, max_output)
         yield {
             "kind": "estimate",
             "prompt_tokens": len(prompt.ids),

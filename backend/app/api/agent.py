@@ -106,6 +106,15 @@ def next_fault(ws):
         return 0
 
 
+class BudgetExhausted(HTTPException):
+    def __init__(self, turn, required, available):
+        super().__init__(409, f"Turn {turn} stopped before inference. The remaining authorization cannot cover it.")
+        self.summary = {
+            "code": "insufficient_budget", "turn": turn,
+            "required_micros": required, "available_micros": available,
+        }
+
+
 def reserve(ws, mandate_id, estimate, rates):
     # The public prefix is free on misses; all public tokens hitting is its worst case.
     total = Decimal(rates.output) * estimate["output_limit"]
@@ -118,14 +127,12 @@ def reserve(ws, mandate_id, estimate, rates):
         total += worst * (s["end"] - s["start"])
     with session_scope(write=False) as db:
         m = owned(db, Mandate, mandate_id, ws)
-        if (
-            m.status != "ACTIVE"
-            or m.cap_micros - m.captured_micros - m.accrued_uncaptured_micros
-            < int(total.to_integral_value(rounding=ROUND_CEILING))
-        ):
-            raise HTTPException(
-                409, "The remaining authorized budget cannot cover the next turn"
-            )
+        if m.status != "ACTIVE":
+            raise HTTPException(409, "An active mandate is required for the next turn")
+        available = m.cap_micros - m.captured_micros - m.accrued_uncaptured_micros
+        required = int(total.to_integral_value(rounding=ROUND_CEILING))
+        if available < required:
+            raise BudgetExhausted(estimate["turn"], required, available)
 
 
 def ensure_budget_before_next(iterator, ws, mid, rates):
@@ -345,10 +352,7 @@ def execute(ws, identifier, context_id, tenant):
                             profile,
                             rates,
                         )
-                        captured = capture(ws, mid)
-                        if captured:
-                            with session_scope() as db:
-                                emit(db, identifier, "capture", captured)
+                        capture(ws, mid)
                     if (
                         engine
                         and buy
@@ -395,7 +399,10 @@ def execute(ws, identifier, context_id, tenant):
                 return
             r.status = "failed"
             r.ended_at = utcnow()
-            emit(db, identifier, "error", {"message": msg})
+            payload = {"message": msg}
+            if isinstance(exc, BudgetExhausted):
+                payload.update(exc.summary)
+            emit(db, identifier, "error", payload)
 
 
 @router.get("/tasks")

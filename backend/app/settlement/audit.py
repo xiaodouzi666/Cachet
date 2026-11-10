@@ -6,7 +6,7 @@ from backend.app.models import AgentRun, Call, Capture, Mandate
 from backend.app.settlement.service import lock, refund_calls
 
 
-def audit(ws, mandate_id, call_id=None):
+def audit(ws, mandate_id, call_id=None, *, run_id=None):
     reason = "dispute" if call_id else "sla"
     with lock(ws):
         with session_scope() as db:
@@ -16,6 +16,8 @@ def audit(ws, mandate_id, call_id=None):
                 .join(AgentRun, AgentRun.id == Call.run_id)
                 .where(AgentRun.mandate_id == mandate_id)
             )
+            if run_id is not None:
+                query = query.where(Call.run_id == run_id)
             calls = list(
                 db.scalars(
                     query.where(Call.id == call_id)

@@ -97,11 +97,9 @@ def maintain():
             if db.get(Control, key):
                 continue
         try:
-            result = audit(workspace_id, mandate_id)
+            audit(workspace_id, mandate_id, run_id=run_id)
             with session_scope() as db:
                 db.merge(Control(key=key, data={"at": now.timestamp()}))
-                for refund in result["refunds"]:
-                    db.add(RunEvent(run_id=run_id, event_type="refund", payload=refund))
         except Exception:
             LOG.exception("Could not audit mandate %s", mandate_id)
     for mandate in mandates:
