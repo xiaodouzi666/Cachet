@@ -25,8 +25,8 @@ export default function Home() {
             <em>fairly paid.</em>
           </h1>
           <p>
-            Publish reusable code context. AI agents buy verified cache hits,
-            and maintainers earn royalties through PayPal.
+            Coding agents answer faster by reusing code already loaded on a GPU.
+            Maintainers earn a PayPal royalty when their code is reused.
           </p>
           <div className="actions">
             <ActionLink href="/judge">Start guided demo</ActionLink>
@@ -57,23 +57,20 @@ export default function Home() {
           {[
             {
               icon: BookOpenText,
-              title: "Publish a context",
-              detail:
-                "Maintainers warm licensed repository code and verify the prefix on the engine.",
+              title: "Maintainers earn royalties",
+              detail: "Publish licensed code and earn a share every time an agent reuses its cached tokens.",
               href: "/publish",
             },
             {
               icon: Cpu,
-              title: "Reuse the prefix",
-              detail:
-                "Agents compare a quote, authorize a budget and pay for measured hits.",
+              title: "Agents spend less time waiting",
+              detail: "Compare the cost, approve one budget and pay only for the shared tokens the GPU reuses.",
               href: "/agent",
             },
             {
               icon: Coins,
-              title: "Settle royalties",
-              detail:
-                "Follow captures, refunds and publisher payouts in the same ledger.",
+              title: "Operators verify payments",
+              detail: "Trace each charge to measured usage, refund missed guarantees and check receipts against PayPal.",
               href: "/settlement",
             },
           ].map(({ icon: Icon, title, detail, href }) => (
