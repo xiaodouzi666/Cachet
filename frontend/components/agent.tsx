@@ -74,7 +74,9 @@ export function RunFeed({
                 : [...prev, t],
             );
           } else if (name === "error") {
-            setError(d.message || d.detail || "The agent run failed.");
+            setError(d.code === "insufficient_budget"
+              ? `${d.message} Available ${usd(d.available_micros)}. The next turn needs up to ${usd(d.required_micros)}.`
+              : d.message || d.detail || "The agent run failed.");
             setTerminal("failed");
             source.close();
             void onComplete().catch((e) => setError(describe(e)));
@@ -140,7 +142,7 @@ export function RunFeed({
   const responseId = (n: number) => `response-${run.id}-${n}`;
   const latest = turns.find((t) => t.turn === viewTurn) || turns.at(-1);
   return (
-    <section className="panel">
+    <section className="panel" aria-label="Metered run activity" data-testid="agent-run" data-run-id={run.id} data-run-status={state}>
       <div className="panel-head">
         <div>
           <h2>Run activity</h2>
@@ -212,7 +214,7 @@ export function RunFeed({
               </thead>
               <tbody>
                 {turns.map((t) => (
-                  <tr key={t.id || t.turn}>
+                  <tr key={t.id || t.turn} data-testid="metered-turn" data-turn={t.turn} data-call-id={t.id}>
                     <td>
                       {t.turn}
                       {t.spans_json?.some((s) => s.kind === "publisher") &&
@@ -361,6 +363,7 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
             <label className="field">
               Context
               <select
+                aria-label="Context"
                 value={context.id}
                 onChange={(e) => setContext(e.target.value)}
               >
@@ -377,6 +380,7 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
             <label className="field">
               Coding task
               <select
+                aria-label="Coding task"
                 value={actualTask || ""}
                 onChange={(e) => setTask(e.target.value)}
               >
