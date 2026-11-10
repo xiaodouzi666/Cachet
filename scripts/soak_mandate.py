@@ -18,6 +18,25 @@ from e2e_demo import Demo, RateLimit, origin, save_report
 from sandbox_smoke import check, locked_journal, now
 
 
+PENDING_TARGETS = 3
+
+
+def admin_for_origin(config, url):
+    if urlsplit(url).hostname in ("127.0.0.1", "localhost", "::1"):
+        return require(config, "ADMIN_TOKEN")
+    return config.get("PRODUCTION_ADMIN_TOKEN") or require(config, "ADMIN_TOKEN")
+
+
+def outcome(snapshot, timestamp):
+    if recording_targets_met(snapshot):
+        return "recording_targets_met", 0
+    if snapshot["billable_micros"] >= snapshot["target_micros"]:
+        return "spending_target_reached_with_c2_pending", PENDING_TARGETS
+    if timestamp >= snapshot["until"]:
+        return "time_window_ended_with_c2_pending", PENDING_TARGETS
+    return "running", 0
+
+
 def operator_request(api, token, method, path, body=None):
     route = "soak-registration" if path == "registration" else "soak/" + path
     response = api.request(method, "/api/operator/" + route, json=body, headers={"X-Cachet-Soak-Token":token})
@@ -41,7 +60,7 @@ def run(args):
     if urlsplit(api_url).hostname not in ("127.0.0.1", "localhost", "::1"):
         check(api_url == origin(require(cfg, "PUBLIC_API_URL")), "Use the configured production API origin for the soak credential.")
     token = require(cfg, "CACHET_SOAK_TOKEN")
-    admin = require(cfg, "ADMIN_TOKEN")
+    admin = admin_for_origin(cfg, api_url)
     check(len(token) >= 32 and token != admin, "The backend and the operator require an independent soak credential.")
     report = args.state.with_name(args.state.stem + "-evidence.json")
     with locked_journal(args.state, "operator-live-soak-v3") as journal, PayPalClient(cfg) as pp, httpx.Client(
@@ -85,13 +104,15 @@ def run(args):
             check(state["workspace_id"] == journal.data["workspace_id"], "The reserved soak belongs to another workspace.")
             return state
         if args.status:
-            print(json.dumps(get_state(), indent=2))
-            return
+            observed = get_state()
+            status, code = outcome(observed, time.time())
+            print(json.dumps({**observed, "measurement_status":status}, indent=2))
+            return code
         if not registration["mandate_id"]:
             operator_request(api, token, "POST", "reserve", {"mandate_id":mid, "context_id":journal.data["context_id"]})
         state = get_state()
         save_snapshot(journal, report, state)
-        if args.continue_if_needed and not recording_targets_met(state) and (
+        if args.continue_if_needed and not recording_targets_met(state) and state["billable_micros"] < 4_750_000 and (
             time.time() >= state["until"] or state["billable_micros"] >= state["target_micros"]
         ):
             state = operator_request(api, token, "POST", f"{mid}/continue/{state['extensions'] + 1}", {})
@@ -129,8 +150,11 @@ def run(args):
                     for c in captures],
                  "refund_readbacks":[{"id":f["id"], "status":f["status"], "amount":f["amount"]} for f in refunds],
                  "recording_targets_met":bool(recording_targets_met(state)), "reconciliation":demo.reconcile()}
+        status, code = outcome(state, time.time())
+        state["measurement_status"] = status
         save_snapshot(journal, report, state)
-        print(f"Recording mandate {mid} remains ACTIVE after {state['metered_turns']} metered turns. Evidence: {report}")
+        print(f"Recording mandate {mid} remains ACTIVE after {state['metered_turns']} metered turns. {status}. Evidence: {report}")
+        return code
 
 
 def post_step(api, token, journal, mid, state):
@@ -157,6 +181,6 @@ if __name__ == "__main__":
     mode.add_argument("--status", action="store_true", help="Print only the sanitized current registration and receipts.")
     mode.add_argument("--continue-if-needed", action="store_true", help="Continue a spent window if recording targets remain, retaining $0.25 headroom.")
     try:
-        run(parser.parse_args())
+        parser.exit(run(parser.parse_args()) or 0)
     except (ValueError, RuntimeError, OSError, httpx.HTTPError) as exc:
         parser.exit(1, str(exc) + "\n")

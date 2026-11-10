@@ -79,3 +79,22 @@ def test_recording_gate_uses_payable_funding_not_gross_earnings():
     assert soak.recording_targets_met(state)
     state["fault_turns"] = 1
     assert not soak.recording_targets_met(state)
+
+
+def test_operator_selects_target_credential_and_signals_pending_c2(monkeypatch):
+    from pathlib import Path
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "scripts"))
+    from soak_mandate import admin_for_origin, outcome, PENDING_TARGETS
+    config = {"ADMIN_TOKEN":"local", "PRODUCTION_ADMIN_TOKEN":"deployed"}
+    assert admin_for_origin(config, "http://127.0.0.1:8000") == "local"
+    assert admin_for_origin(config, "http://[::1]:8000") == "local"
+    assert admin_for_origin(config, "https://api.example.invalid") == "deployed"
+    state = {"threshold_captures":2, "fault_turns":5, "fault_refund_ids":[True],
+             "publisher_available_micros":{"starlette":300_000, "fastapi":260_000},
+             "billable_micros":4_200_000, "target_micros":4_200_000, "until":100}
+    assert outcome(state, 99) == ("spending_target_reached_with_c2_pending", PENDING_TARGETS)
+    state["billable_micros"] = 4_100_000
+    assert outcome(state, 101) == ("time_window_ended_with_c2_pending", PENDING_TARGETS)
+    assert outcome(state, 99) == ("running", 0)
+    state["fault_turns"] = 6
+    assert outcome(state, 101) == ("recording_targets_met", 0)
