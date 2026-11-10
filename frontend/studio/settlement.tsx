@@ -41,6 +41,7 @@ const sources = [
       "mandate_id",
       "amount_cents",
       "fee_cents",
+      "net_cents",
       "status",
     ],
   },
@@ -51,6 +52,8 @@ const sources = [
       "paypal_refund_id",
       "capture_id",
       "amount_cents",
+      "fee_cents",
+      "net_cents",
       "reason",
       "status",
     ],
@@ -58,11 +61,24 @@ const sources = [
   {
     id: "payouts",
     name: "Payout batches",
-    fields: ["paypal_batch_id", "sender_batch_id", "fee_cents", "status"],
+    fields: ["paypal_batch_id", "amount_cents", "fee_cents", "net_cents", "status"],
   },
 ] as const;
 type SourceId = (typeof sources)[number]["id"];
 export type Tables = Record<SourceId, FinancialRow[]>;
+function fieldLabel(source: SourceId, key: string) {
+  if (key === "amount_cents") return "Amount (USD)";
+  if (key === "fee_cents") return source === "refunds" ? "Fee returned (USD)" : "PayPal fee (USD)";
+  if (key === "net_cents") return source === "captures" ? "Net received (USD)" : "Net debited (USD)";
+  return key.replaceAll("_", " ");
+}
+
+function fieldValue(record: FinancialRow, key: string) {
+  const value = record[key];
+  if (key.endsWith("_cents")) return typeof value === "number" ? value / 100 : null;
+  return value ?? null;
+}
+
 type Proposal = { proposal_id: string; description: string };
 const Royalties = createContext<Royalty[]>([]);
 function RoyaltyTree() {
@@ -197,13 +213,13 @@ export default function SettlementStudio({
         name: src.name,
         data: tables[src.id].map((record) =>
           Object.fromEntries(
-            src.fields.map((key) => [key, record[key] ?? null]),
+            src.fields.map((key) => [key, fieldValue(record, key)]),
           ),
         ),
         fields: src.fields.map((key) => ({
           id: key,
-          name: key.replaceAll("_", " "),
-          format: /(micros|cents)$/.test(key) ? "integerFormat" : "textFormat",
+          name: fieldLabel(src.id, key),
+          format: key.endsWith("_cents") ? "currencyFormat" : key.endsWith("_micros") ? "integerFormat" : "textFormat",
         })),
       })),
     }),
