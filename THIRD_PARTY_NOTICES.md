@@ -15,7 +15,7 @@ BSD-3-Clause permits redistribution subject to retention of its notices and disc
 
 The manifest records each source revision and SHA-256 digest, the text and token hashes of each layer, and the pinned tokenizer digest. Tokenize the UTF-8 text of each layer independently, including file headers and the final newline, with special-token insertion disabled. The token hash covers unsigned 32-bit token IDs in little-endian order. [Source manifest](contexts/manifest.json)
 
-The default model configuration allows 32,768 tokens. The layers occupy 25,900 in total. Reserving 4,096 for conversation, generation and prompt framing leaves another 2,772. [Pinned model configuration](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ/blob/b25037543e9394b818fdfca67ab2a00ecc7dd641/config.json)
+The default model configuration allows 32,768 tokens. The licensed Starlette and FastAPI layers occupy 11,992 and 13,908 tokens respectively, or 25,900 together. Cachet limits each live task prompt plus its 640-token generation reserve to 31,000 tokens. The agent uses a rolling conversation window to stay within this limit. [Pinned model configuration](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ/blob/b25037543e9394b818fdfca67ab2a00ecc7dd641/config.json)
 
 Run the following from the repository root in a Python environment with the Hugging Face `tokenizers` package installed. You can also pass the tokenizer JSON from an existing model snapshot.
 
@@ -23,3 +23,9 @@ Run the following from the repository root in a Python environment with the Hugg
 curl -fsSL https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ/resolve/b25037543e9394b818fdfca67ab2a00ecc7dd641/tokenizer.json -o /tmp/cachet-qwen-tokenizer.json
 python scripts/verify_contexts.py /tmp/cachet-qwen-tokenizer.json
 ```
+
+## Frontend dependencies
+
+The dashboard uses AG Grid Community and its React wrapper under MIT. AG Studio and its React wrapper use their own commercial license. The sponsor provides the judging license for the PayPal AI Hackathon AG Grid challenge. Development trials and other deployments follow AG Grid's licensing terms. The Cachet MIT license applies to Cachet's original dashboard components. [Dependency versions](frontend/package.json) · [AG Grid licensing](https://www.ag-grid.com/license-pricing/) · [Hackathon judging terms](https://www.ag-grid.com/blog/build-a-payments-dashboard-without-building-a-dashboard/)
+
+Inter and JetBrains Mono are bundled through Fontsource under SIL Open Font License 1.1. Lucide React icons use the ISC license with the applicable upstream notices. The installed font packages include their `LICENSE` files, and `lucide-react` includes its upstream license file. [Pinned dependency tree](frontend/package-lock.json)
