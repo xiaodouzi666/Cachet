@@ -382,6 +382,11 @@ def close_dust(session, mandate):
         mandate.accrued_uncaptured_micros = 0
 
 
+def written_off_micros(session, mandate_id):
+    return session.scalar(select(func.coalesce(func.sum(LedgerEntry.debit_micros), 0)).where(
+        LedgerEntry.ref_id == mandate_id, LedgerEntry.ref_type == "writeoff", LedgerEntry.account == "platform:writeoff"))
+
+
 def forgive_at_close(session, mandate, minimum):
     """Absorb the remaining consumer receivable while keeping accrued publisher royalties payable."""
     pending = mandate.accrued_uncaptured_micros

@@ -18,7 +18,6 @@ from backend.app.models import (
     Capture,
     Consumer,
     Mandate,
-    LedgerEntry,
     Refund,
     utcnow,
 )
@@ -107,8 +106,7 @@ def view(m):
     if db is None:
         with session_scope(write=False) as db:
             return view(db.get(Mandate, m.id))
-    forgiven = db.scalar(select(func.coalesce(func.sum(LedgerEntry.debit_micros), 0)).where(
-        LedgerEntry.ref_id == m.id, LedgerEntry.ref_type == "writeoff", LedgerEntry.account == "platform:writeoff"))
+    forgiven = ledger.written_off_micros(db, m.id)
     fees = db.scalar(select(func.coalesce(func.sum(Capture.fee_cents), 0)).where(Capture.mandate_id == m.id))
     return {
         k: getattr(m, k)
@@ -444,6 +442,10 @@ def close(ws, identifier):
                 transition(obj, "FAILED")
                 return view(obj)
         capture(ws, identifier, final=True)
+        # Persist the platform expense before releasing PayPal's hold. A lost void response
+        # leaves this mandate in CLOSING and the original write-off available for recovery.
+        with session_scope() as db:
+            ledger.forgive_at_close(db, owned(db, Mandate, identifier, ws), final_minimum())
         auth = pp.get_authorization(m.authorization_id)
         if auth["status"] in {"CREATED", "PARTIALLY_CAPTURED"}:
             pp.void(m.authorization_id, request_id(ws, "void", m.id))
@@ -454,8 +456,9 @@ def close(ws, identifier):
             raise HTTPException(409, f"PayPal authorization is still {auth['status']}")
         with session_scope() as db:
             m = owned(db, Mandate, identifier, ws)
-            had_charges = m.captured_micros or m.accrued_uncaptured_micros
-            ledger.forgive_at_close(db, m, final_minimum())
+            if m.status in {"CLOSED", "VOIDED", "EXPIRED"}:
+                return view(m)
+            had_charges = m.captured_micros or ledger.written_off_micros(db, m.id)
             transition(
                 m,
                 "CLOSED"
