@@ -1,13 +1,14 @@
 "use strict";
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { randomUUID } = require("node:crypto");
+const { randomUUID, createHash } = require("node:crypto");
 const { spawn, execFile, execFileSync } = require("node:child_process");
 const { promisify } = require("node:util");
 const { performance } = require("node:perf_hooks");
 const { recordSoakSegment } = require("./soak_scenes.cjs");
 const exec = promisify(execFile);
 const root = path.resolve(__dirname, "..");
+const providerStillStyle = "body *{visibility:hidden!important} [data-cachet-film-visible],[data-cachet-film-visible] *,iframe[data-cachet-film-frame]{visibility:visible!important}";
 const regularOrder = ["S2","S3","S4","S5","S1","S6","S8"];
 const all = [...regularOrder,"S7"];
 const changing = new Set(["S3","S4","S5","S6"]);
@@ -35,6 +36,35 @@ async function fileLock(file,work,nonblocking=false) {
     return await work();
   } finally { child.stdin.end(); await done; }
 }
+async function restoreSubmittedSoak(scene, cameras, sourceDir, pair) {
+  const label = scene === "S6" ? "original-close-submitted" : "original-payout-submitted";
+  if (pair.every(view => view.events.some(event => event.label === label))) return {sourceDir, pair};
+  assert(pair.every(view => !view.events.some(event => event.label === label) &&
+    view.evidence.action.startsWith("verified existing ")), "Both cameras must refer to one original submission.");
+  const joinedDir = scene + "-joined-" + randomUUID();
+  const observed = [];
+  for (const [index, camera] of cameras.entries()) {
+    const view = pair[index];
+    const id = scene === "S6" ? view.evidence.provider.authorization_id : view.evidence.mandateId;
+    const digest = createHash("sha256").update(id).digest("hex");
+    const {stdout} = await exec(process.env.CACHET_PYTHON || "python3",
+      [path.join(__dirname, "join_soak.py"), camera.dir, scene, sourceDir, joinedDir, digest]);
+    const joined = JSON.parse(stdout);
+    view.events = joined.events;
+    view.evidence.observationParts = joined.observationParts;
+    const events = view.events.filter(event => event.label === label && event.actionKey === id);
+    assert(events.length === 1 && events[0].utc, "The recovered footage lacks its original browser request.");
+    observed.push(events[0].utc);
+  }
+  assert(observed[0] === observed[1], "Recovered camera streams observed different original requests.");
+  return {sourceDir: joinedDir, pair};
+}
+
+function gpuLockPath() {
+  if(process.env.CACHET_GPU_LOCK)return process.env.CACHET_GPU_LOCK;
+  const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
+  return path.join(path.dirname(common),".cache/night-gpu.lock");
+}
 function options(args) {
   const value = flag => {
     const n=args.indexOf(flag);
@@ -42,12 +72,16 @@ function options(args) {
     assert(args[n+1] && !args[n+1].startsWith("--"),"Missing "+flag+" value");
     return args[n+1];
   };
-  const opts=new Set(["--session","--rehearsal","--isolated-rehearsal-actions","--archive-gallery","--compose-only","--cleanup","--allow-partial"]);
+  const opts=new Set(["--soak-only","--regular-take","--session","--rehearsal","--isolated-rehearsal-actions","--archive-gallery","--compose-only","--cleanup","--allow-partial"]);
   assert(args.filter(x=>x.startsWith("--")).every(x=>opts.has(x)),"Unknown recorder option.");
-  const sceneArg=args.find((s,i)=>!s.startsWith("--")&&args[i-1]!=="--session");
+  const sceneArg=args.find((s,i)=>!s.startsWith("--")&&!["--session","--regular-take"].includes(args[i-1]));
+  const only=value("--regular-take");
+  assert(only===undefined || ["1","2"].includes(only),"Choose --regular-take 1 or 2.");
   const names=sceneArg?sceneArg.split(","):all;
   assert(names.length && names.every(n=>all.includes(n)) && new Set(names).size===names.length,"Choose distinct S1–S8 IDs.");
-  return {names,dir:value("--session"),rehearsal:args.includes("--rehearsal"),actions:args.includes("--isolated-rehearsal-actions"),
+  const soakOnly=args.includes("--soak-only");
+  assert(!soakOnly || (!only && names.every(n=>["S5","S6","S7"].includes(n))),"--soak-only requires S5, S6 or S7 and both cameras.");
+  return {names,dir:value("--session"),regularTake:only?Number(only):null,soakOnly,rehearsal:args.includes("--rehearsal"),actions:args.includes("--isolated-rehearsal-actions"),
           gallery:args.includes("--archive-gallery"),compose:args.includes("--compose-only"),cleanup:args.includes("--cleanup"),
           allowPartial:args.includes("--allow-partial")};
 }
@@ -157,7 +191,7 @@ async function recordNormal(camera,scene,browser,api,opts) {
       assert(res?.ok(),"Recording page did not load: "+route);
       await api.expect(page.locator("html")).toHaveClass(/recording/);
     };
-    const mark=async(label,target=page,mask=[])=>{
+    const mark=async(label,target=page,mask=[],surface="application")=>{
       assert(/^[a-z0-9-]+$/.test(label),"Invalid milestone label");
       const ms=Math.round(performance.now()-start);
       const screenshot=scene+"-"+label+".png";
@@ -166,8 +200,8 @@ async function recordNormal(camera,scene,browser,api,opts) {
         if(await locator.count()) obscured.push(locator);
       }
       await target.screenshot({path:path.join(camera.dir,screenshot),...(obscured.length?{mask:obscured}:{}),
-          ...(target!==page?{style:"input,iframe,[autocomplete],address,[data-testid*=address i],[data-testid*=email i],[data-testid*=card i]{visibility:hidden!important}"}:{})});
-      entry.events.push({label,ms,screenshot,utc:new Date().toISOString()});
+          ...(surface==="verified-provider-control"?{style:providerStillStyle}:{})});
+      entry.events.push({label,ms,screenshot,surface,utc:new Date().toISOString()});
       await camera.save();
       // A short reading beat for the displayed slides and an encoder tail for live
       // actions. Wait on displayed animation frames so the video includes the new DOM.
@@ -186,6 +220,8 @@ async function recordNormal(camera,scene,browser,api,opts) {
     await checkpoint({});
   } catch(error) {
     entry.status="incomplete";
+    entry.failure={category:["TimeoutError","AssertionError","CheckoutError"].includes(error.name)?error.name:"recording-error",
+                   after:entry.events.at(-1)?.label||"scene-start"};
     throw error;
   } finally {
     const v=page?.video(); await context.close();
@@ -233,6 +269,7 @@ async function runRecorder(api,args) {
       try {
         if(opts.cleanup) { for(const c of cameras) await cleanup(c,browser,api); return; }
         for(const c of cameras){
+          if(opts.soakOnly || (opts.regularTake && c.data.camera!==opts.regularTake))continue;
           const ordered=regularOrder.filter(scene=>opts.names.includes(scene));
           const runCamera=async()=>{
             let failed=false;
@@ -255,14 +292,17 @@ async function runRecorder(api,args) {
           const usesGpu=ordered.some(n=>changing.has(n)&&c.data.segments[n+"-regular"]?.status!=="captured");
           let failed;
           if(usesGpu){
-            const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
-            const lock=process.env.CACHET_GPU_LOCK||path.join(path.dirname(common),".cache/night-gpu.lock");
-            failed=await fileLock(lock,async()=>{
+            failed=await fileLock(gpuLockPath(),async()=>{
               try { return await runCamera(); }
               finally { await waitForSponsor(c,browser,api); }
             });
           } else failed=await runCamera();
           if(failed&&!opts.allowPartial) break;
+        }
+        if(opts.regularTake){
+          if(faults.length)throw Error(faults.join("\n"));
+          console.log("Saved ordinary camera "+opts.regularTake+" in "+session);
+          return;
         }
         if(!faults.length||opts.allowPartial){
           for(const scene of ["S5","S6","S7"].filter(n=>opts.names.includes(n))){
@@ -272,11 +312,19 @@ async function runRecorder(api,args) {
               const pairFile=path.join(session,"private","pair-"+scene+".json");
               let savedPair=await read(pairFile,null);
               if(!savedPair){
-                const sourceDir=scene+"-attempt-"+randomUUID();
-                const pair=await recordSoakSegment({scene,browser,baseURL:meta.origin,journalPath:opts.actions?
-                process.env.CACHET_SOAK_REHEARSAL_JOURNAL:process.env.CACHET_SOAK_JOURNAL,
-                outputDirs:cameras.map(c=>path.join(c.dir,sourceDir)),rehearsal:opts.rehearsal,rehearsalActions:opts.actions});
-                savedPair={sourceDir,pair};
+                const observationFile=path.join(session,"private","observation-"+scene+".json");
+                let observation=await read(observationFile,null);
+                if(!observation){
+                  const sourceDir=scene+"-attempt-"+randomUUID();
+                  const recordSoak=()=>recordSoakSegment({scene,browser,baseURL:meta.origin,journalPath:opts.actions?
+                    process.env.CACHET_SOAK_REHEARSAL_JOURNAL:process.env.CACHET_SOAK_JOURNAL,
+                    outputDirs:cameras.map(c=>path.join(c.dir,sourceDir)),rehearsal:opts.rehearsal,rehearsalActions:opts.actions});
+                  const pair=scene==="S7" ? await fileLock(gpuLockPath(),recordSoak) : await recordSoak();
+                  observation={sourceDir,pair};
+                  await atomic(observationFile,observation);
+                }
+                savedPair=(scene==="S6" || scene==="S7") && (!opts.rehearsal || opts.actions)
+                  ? await restoreSubmittedSoak(scene,cameras,observation.sourceDir,observation.pair) : observation;
                 await atomic(pairFile,savedPair);
               }
               for(const [i,c] of cameras.entries()){
@@ -286,6 +334,11 @@ async function runRecorder(api,args) {
               }
             }catch(e){faults.push(scene+": "+e.message);break;}
           }
+        }
+        if(opts.soakOnly){
+          if(faults.length)throw Error(faults.join("\n"));
+          console.log("Saved both original soak angles for "+opts.names.join(", ")+" in "+session);
+          return;
         }
       } finally {await browser.close();}
     }
@@ -301,4 +354,4 @@ async function runRecorder(api,args) {
     if(faults.length)throw Error(faults.join("\n"));
   },true);
 }
-module.exports={runRecorder,options};
+module.exports={runRecorder,options,providerStillStyle};

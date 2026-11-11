@@ -104,7 +104,9 @@ function actionEvent(cams,label,key){
   for(const cam of cams){
     const event={label,ms:Math.round(t-cam.start),utc,actionKey:key};
     cam.events.push(event);
-    require("node:fs").appendFileSync(path.join(cam.dir,cam.scene+"-soak-action-events.jsonl"),JSON.stringify(event)+"\n",{mode:0o600,flush:true});
+    const sync=require("node:fs");
+    const fd=sync.openSync(path.join(cam.dir,cam.scene+"-soak-action-events.jsonl"),"a",0o600);
+    try{sync.writeFileSync(fd,JSON.stringify(event)+"\n");sync.fsyncSync(fd);}finally{sync.closeSync(fd);}
   }
 }
 function checkDisplayedMoney(text, micros){
@@ -264,12 +266,42 @@ async function explainRoyalties(cam){
   await page.getByRole("button",{name:/Ops Copilot/}).click();
   const question="How much did Starlette earn this week, and why more per token than FastAPI?";
   await page.getByRole("textbox",{name:"Message input"}).fill(question);
-  const [answer]=await Promise.all([page.waitForResponse(r=>new URL(r.url()).pathname==="/api/copilot" && r.request().method()==="POST",{timeout:120000}),
-    page.getByRole("button",{name:"Send message"}).click()]);
-  const body=await answer.text();check(answer.ok()&&body.includes("event: done")&&!body.includes("event: error"),"Copilot did not finish the workspace question");
+  // Chromium can discard a completed streaming response before CDP requests its
+  // body. Observe the actual same-origin fetch in the page while the app reads it.
+  await page.evaluate(() => {
+    const request = window.fetch;
+    window.__cachetFilmedReply = new Promise((resolve, reject) => {
+      window.fetch = async function(input, init) {
+        const result = await request.apply(this, arguments);
+        if (new URL(result.url).pathname === "/api/copilot" &&
+            (init?.method || input?.method || "GET").toUpperCase() === "POST") {
+          window.fetch = request;
+          result.clone().text().then(body => resolve({ok:result.ok,body}), reject);
+        }
+        return result;
+      };
+    });
+  });
+  await page.getByRole("button",{name:"Send message"}).click();
+  const {ok,body}=await page.evaluate(timeout=>Promise.race([
+    window.__cachetFilmedReply,
+    new Promise((_,reject)=>setTimeout(()=>reject(Error("Timed out reading the live Copilot stream")),timeout)),
+  ]),120000);
+  check(ok&&body.includes("event: done")&&!body.includes("event: error")&&body.includes("publisher_earnings"),"Copilot did not finish the workspace earnings question");
   const deltas=body.split(/\r?\n\r?\n/).filter(x=>x.startsWith("event: delta")).map(x=>JSON.parse(x.split(/\r?\ndata: /)[1]).text);
   const text=deltas.join("").trim();check(text,"No grounded answer in this workspace");
-  await expect(page.getByText(text,{exact:false}).last()).toBeVisible();
+  const answerPanel=page.locator(".ag-studio-ai-output-message-content:visible");
+  // Studio renders the answer as multiple Markdown paragraphs. Check the actual
+  // amounts returned by this workspace's tool against the visible answer panel.
+  const amounts=[...new Set(text.match(/\$\d+(?:\.\d+)?/g)||[])];
+  check(amounts.length>=2 && /Starlette/i.test(text) && /FastAPI/i.test(text) && /Shapley/i.test(text),
+    "The live earnings answer did not explain both publishers");
+  await expect.poll(async()=>{
+    const shown=(await answerPanel.allInnerTexts()).join(" ").replace(/\s+/g," ");
+    return amounts.every(amount=>shown.includes(amount)) && ["starlette","fastapi","shapley"].every(term=>shown.toLowerCase().includes(term));
+  },{timeout:30000,message:"The actual workspace earnings and Shapley explanation must appear in the Studio answer"}).toBe(true);
+  await answerPanel.last().scrollIntoViewIfNeeded();
+
   await mark(cam,"copilot-royalty-answer");
 }
 async function savedBatch(b, batchId){

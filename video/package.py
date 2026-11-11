@@ -61,7 +61,12 @@ def inspect_take(directory, *, rehearsal=False, partial=False):
     contents = {"timeline.json": timeline_path}
     for scene in SCENES:
         entry = data["scenes"].get(scene, {})
-        if entry.get("status") != "captured" or not entry.get("events"):
+        usable = (
+            entry.get("status") == "captured"
+            or partial
+            and entry.get("status") == "partial"
+        )
+        if not usable or not entry.get("events"):
             if partial:
                 continue
             raise ValueError(f"Missing complete {scene} in {directory}")
@@ -106,127 +111,127 @@ def inspect_take(directory, *, rehearsal=False, partial=False):
     return data["origin"], contents
 
 
-def verify_pair(takes):
+def ordinary_identity(t):
+    components = t["scenes"]
+
+    def regular(scene):
+        return components[scene]["segments"]["regular"]["evidence"]
+
+    publish = regular("S3")
+    approval = regular("S4")
+    task = regular("S5")
+    exception = regular("S6")
+    prefix = regular("S1")
+    cleanup = t["regular_wallet_cleanup"]
+    if not (
+        publish["workspaceId"]
+        == task["workspaceId"]
+        == exception["workspaceId"]
+        == prefix["workspaceId"]
+        and approval["mandateId"] == task["mandateId"] == exception["mandateId"]
+        and prefix["mode"] == "live"
+        and prefix["runId"]
+        == task["runId"]
+        == components["S4"]["segments"]["decision"]["evidence"]["runId"]
+        and len(set(task["calls"])) == 10
+        and cleanup["verified"]
+        and approval["authorizationId"] == cleanup["receipt"]["authorization_id"]
+        and approval["orderId"] == cleanup["receipt"]["order_id"]
+    ):
+        raise ValueError(
+            "Ordinary views and release must belong to the same filmed live wallet"
+        )
+    if not t["rehearsal"] and not (
+        approval.get("approval", {}).get("verifiedProviderControlFilmed")
+        and any(event.get("surface") == "verified-provider-control" and event["label"] == "sandbox-wallet-open"
+                for event in components["S4"]["events"])
+    ):
+        raise ValueError("The original sandbox approval control was not captured")
+    return publish["workspaceId"], approval["authorizationId"], approval["mandateId"]
+
+
+def soak_identity(t):
+    components = t["scenes"]
+    parts = [
+        components[scene]["segments"]["soak"]["evidence"]
+        for scene in ("S5", "S6", "S7")
+    ]
+    if (
+        len({p["workspaceId"] for p in parts}) != 1
+        or len({p["mandateId"] for p in parts}) != 1
+        or any(p["camera"] != t["camera"] for p in parts)
+    ):
+        raise ValueError(
+            "Soak segments refer to different workspaces, mandates or cameras"
+        )
+    if (
+        len({c["id"] for c in parts[0]["thresholdCaptures"]}) < 2
+        or len(parts[2]["batch"]["items"]) != 2
+    ):
+        raise ValueError("Missing original threshold captures or payout recipients")
+    actions = []
+    for scene, label, identity in (
+        (
+            "S6",
+            "soak-original-close-submitted",
+            parts[1]["provider"]["authorization_id"],
+        ),
+        ("S7", "soak-original-payout-submitted", parts[2]["mandateId"]),
+    ):
+        events = [e for e in components[scene]["events"] if e["label"] == label]
+        if (
+            len(events) != 1
+            or events[0].get("actionKey") != identity
+            or not events[0].get("utc")
+        ):
+            raise ValueError(f"Original submission missing or mismatched for {scene}")
+        actions.append((identity, events[0]["utc"]))
+    return (
+        parts[0]["workspaceId"],
+        parts[0]["mandateId"],
+        parts[2]["batch"]["id"],
+        actions,
+    )
+
+
+def verify_pair(takes, *, rehearsal=False):
     a, b = takes
     if (
-        a.get("camera") != 1
-        or b.get("camera") != 2
+        (a.get("camera"), b.get("camera")) != (1, 2)
         or not a.get("session")
-        or a["session"] != b.get("session")
+        or a.get("session") != b.get("session")
     ):
+        raise ValueError("Expected two actual cameras from the same recording session")
+    complete = [
+        t
+        for t in takes
+        if all(t["scenes"].get(s, {}).get("status") == "captured" for s in SCENES)
+    ]
+    if len(complete) < (1 if rehearsal else 2):
         raise ValueError(
-            "Expected the two original cameras of a single recording session"
+            "One complete eight-scene rehearsal is required"
+            if rehearsal
+            else "Two complete eight-scene production takes are required"
         )
-    for scene in SCENES:
-        each = [t["scenes"][scene] for t in takes]
-        if any(s.get("status") != "captured" for s in each):
-            raise ValueError(f"Missing scene {scene} in the camera pair")
+    soaks = [soak_identity(t) for t in takes]
+    if soaks[0] != soaks[1]:
+        raise ValueError("The two cameras must show the same original soak actions")
+    for scene in ("S5", "S6", "S7"):
         if (
-            scene in {"S4", "S5", "S6", "S7"}
-            and each[0]["video_sha256"] == each[1]["video_sha256"]
+            a["scenes"][scene]["segments"]["soak"]["source_video_sha256"]
+            == b["scenes"][scene]["segments"]["soak"]["source_video_sha256"]
         ):
-            raise ValueError(f"Duplicate financial footage for {scene}")
-        if scene in {"S5", "S6", "S7"}:
-            first, second = (
-                entry["segments"]["soak"]["source_video_sha256"] for entry in each
-            )
-            if first == second:
-                raise ValueError(
-                    f"The two {scene} angles share an identical original camera recording"
-                )
-    cash = []
-    for t in takes:
-        components = t["scenes"]
-
-        def evidence(scene, part):
-            return components[scene]["segments"][part]["evidence"]
-
-        publish = evidence("S3", "regular")
-        approval = evidence("S4", "regular")
-        task = evidence("S5", "regular")
-        ordinary = evidence("S6", "regular")
-        prefix = evidence("S1", "regular")
-        if (
-            prefix.get("runId") != task["runId"]
-            or prefix.get("workspaceId") != task["workspaceId"]
-            or prefix.get("mode") != "live"
-        ):
-            raise ValueError(
-                "S1 must show the completed ten-turn live run from the same camera's S5"
-            )
-        cleanup = t["regular_wallet_cleanup"]
-        if not (
-            publish["workspaceId"] == task["workspaceId"] == ordinary["workspaceId"]
-            and approval["mandateId"] == task["mandateId"] == ordinary["mandateId"]
-            and task["runId"] == evidence("S4", "decision")["runId"]
-            and len(set(task["calls"])) == 10
-            and cleanup["verified"]
-            and approval["authorizationId"] == cleanup["receipt"]["authorization_id"]
-            and approval["orderId"] == cleanup["receipt"]["order_id"]
-        ):
-            raise ValueError(
-                "The regular camera did not follow and release its original authorized wallet"
-            )
-        parts = [evidence(scene, "soak") for scene in ("S5", "S6", "S7")]
-        if (
-            len({v["workspaceId"] for v in parts}) != 1
-            or len({v["mandateId"] for v in parts}) != 1
-            or any(v["camera"] != t["camera"] for v in parts)
-        ):
-            raise ValueError(
-                "The soak segments do not share their original workspace and mandate"
-            )
-        if (
-            parts[0]["workspaceId"] == publish["workspaceId"]
-            or parts[0]["mandateId"] == approval["mandateId"]
-        ):
-            raise ValueError("The regular wallet and soak must use separate mandates")
-        if (
-            len({c["id"] for c in parts[0]["thresholdCaptures"]}) < 2
-            or len(parts[2]["batch"]["items"]) != 2
-        ):
-            raise ValueError("The two captures and original payout are required")
-        signed = []
-        for scene, label in (
-            ("S6", "soak-original-close-submitted"),
-            ("S7", "soak-original-payout-submitted"),
-        ):
-            events = [ev for ev in components[scene]["events"] if ev["label"] == label]
-            if (
-                len(events) != 1
-                or not events[0].get("actionKey")
-                or not events[0].get("utc")
-            ):
-                raise ValueError(
-                    f"No filmed original transaction submission in {scene}"
-                )
-            expected = (
-                parts[1]["provider"]["authorization_id"]
-                if scene == "S6"
-                else parts[2]["mandateId"]
-            )
-            if events[0]["actionKey"] != expected:
-                raise ValueError(
-                    f"The {scene} submission does not belong to the recorded original authorization"
-                )
-            signed.append((events[0]["actionKey"], events[0]["utc"]))
-        cash.append(
-            (
-                publish["workspaceId"],
-                approval["authorizationId"],
-                parts[0]["mandateId"],
-                parts[2]["batch"]["id"],
-                signed,
-            )
-        )
-    if (
-        cash[0][0] == cash[1][0]
-        or cash[0][1] == cash[1][1]
-        or cash[0][2:] != cash[1][2:]
-    ):
-        raise ValueError(
-            "Regular sessions must be independent and both soak cameras must observe the same two actions"
-        )
+            raise ValueError(f"The original {scene} camera streams are identical")
+    wallets = [ordinary_identity(t) for t in complete]
+    if any(ws == soaks[0][0] or mid == soaks[0][1] for ws, _, mid in wallets):
+        raise ValueError("Ordinary and soak wallets must be separate")
+    if len(complete) == 2:
+        if wallets[0][0] == wallets[1][0] or wallets[0][1] == wallets[1][1]:
+            raise ValueError("The two ordinary takes must have independent wallets")
+        for scene in ("S4", "S5", "S6", "S7"):
+            if a["scenes"][scene]["video_sha256"] == b["scenes"][scene]["video_sha256"]:
+                raise ValueError(f"Duplicate financial footage for {scene}")
+    return [t["camera"] for t in complete]
 
 
 def main():
@@ -266,6 +271,13 @@ def main():
             "scenes"
         ]
         files.update({f"take-{index}/{k}": v for k, v in contents.items()})
+    rehearsal_complete = []
+    if args.rehearsal:
+        try:
+            rehearsal_complete = verify_pair(full_takes, rehearsal=True)
+        except (KeyError, ValueError):
+            if not args.partial:
+                raise
     pair_error = None
     try:
         verify_pair(full_takes)
@@ -276,7 +288,7 @@ def main():
     durations = args.narration / "durations.json"
     files["narration/durations.json"] = durations
     voice = json.loads(durations.read_text())
-    if not args.partial and not args.rehearsal:
+    if (not args.partial and not args.rehearsal) or rehearsal_complete:
         accepted_timelines = {
             hashlib.sha256((directory / "timeline.json").read_bytes()).hexdigest()
             for directory in args.takes
@@ -337,6 +349,7 @@ def main():
                     "rehearsal": args.rehearsal,
                     "status": "partial" if args.partial else "complete",
                     "pair_check": pair_error or "verified",
+                    "complete_rehearsal_cameras": rehearsal_complete,
                     "missing": {
                         k: [
                             n
@@ -364,6 +377,20 @@ def main():
                 if check.testzip():
                     raise ValueError("Archive failed CRC verification")
             archive.replace(args.output)
+        elif args.output.exists():
+            from compose_take import sha
+
+            published = {
+                p.relative_to(args.output).as_posix(): p
+                for p in args.output.rglob("*")
+                if p.is_file()
+            }
+            if published.keys() != inputs.keys() or any(
+                sha(published[n]) != sha(p) for n, p in inputs.items()
+            ):
+                raise ValueError(
+                    "The existing handoff differs from these inputs; choose a fresh output path"
+                )
         else:
             for name, path in files.items():
                 dest = stage / name

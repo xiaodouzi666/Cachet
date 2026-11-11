@@ -249,7 +249,7 @@ def join_motion(source, ranges, parts, options, tmp):
     return count
 
 
-def compose(raw, dest, manifest, scene, tmp, crf):
+def compose(raw, dest, manifest, scene, tmp, crf, kinds):
     options = [
         "-an",
         "-c:v",
@@ -275,7 +275,7 @@ def compose(raw, dest, manifest, scene, tmp, crf):
     marks = []
     sources = {}
     output_frame = 0
-    for kind in sources_for(scene):
+    for kind in kinds:
         source_scene = "S5" if kind == "decision" else scene
         source_kind = "regular" if kind == "decision" else kind
         entry = manifest["segments"][source_scene + "-" + source_kind]
@@ -306,6 +306,27 @@ def compose(raw, dest, manifest, scene, tmp, crf):
             if still.exists() and not popup:
                 frame = register_frame(source, event["ms"], still, frames)
             points.append((event, frame, still, popup))
+        # Browser monotonic time starts just before this page's actual screencast.
+        # Anchor unscreenshoted request markers to the closest photographed DOM event.
+        # Keep the original UTC and raw_ms for correlating the same request on both cameras.
+        anchors = [
+            (event["ms"], frame - round(event["ms"] * FPS / 1000), event.get("fragment"))
+            for event, frame, still, popup in points
+            if still.exists() and not popup
+        ]
+        if anchors:
+            corrected = []
+            for event, frame, still, popup in points:
+                matching = [a for a in anchors if a[2] == event.get("fragment")]
+                if matching and (popup or not still.exists()):
+                    offset = min(
+                        matching, key=lambda anchor: abs(anchor[0] - event["ms"])
+                    )[1]
+                    frame = max(
+                        0, min(frames - 1, round(event["ms"] * FPS / 1000) + offset)
+                    )
+                corrected.append((event, frame, still, popup))
+            points = corrected
         all_frames = [(0, frames)]
         if source_scene == "S5" and source_kind == "regular":
             decision = next(
@@ -430,7 +451,7 @@ def compose(raw, dest, manifest, scene, tmp, crf):
             }
             if still.exists():
                 mark["source_screenshot_sha256"] = sha(still)
-            for field in ("utc", "actionKey"):
+            for field in ("utc", "actionKey", "fragment", "fragment_ms", "surface"):
                 if field in event:
                     mark[field] = event[field]
             marks.append(mark)
@@ -472,6 +493,36 @@ def compose(raw, dest, manifest, scene, tmp, crf):
     }
 
 
+def input_digest(raw, manifest, scene, crf, kinds):
+    inputs = [sha(Path(__file__)), crf]
+    for kind in kinds:
+        target = "S5" if kind == "decision" else scene
+        component = "regular" if kind == "decision" else kind
+        entry = manifest["segments"][target + "-" + component]
+        directory = (raw / entry.get("sourceDir", ".")).resolve()
+        if not directory.is_relative_to(raw):
+            raise ValueError("Source lies outside the sealed camera directory")
+        prefix = target + ("-soak" if component == "soak" else "")
+        hashes = [sha(directory / (prefix + ".webm"))]
+        for mark in entry["events"]:
+            file = directory / (prefix + "-" + mark["label"] + ".png")
+            if file.is_file():
+                hashes.append(sha(file))
+        inputs.append([entry, hashes])
+    return hashlib.sha256(
+        json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def intact(directory, scene, entry):
+    files = [(directory / (scene + ".webm"), entry["video_sha256"])]
+    files.extend(
+        (directory / (scene + "-" + e["label"] + ".png"), e["screenshot_sha256"])
+        for e in entry["events"]
+    )
+    return all(p.is_file() and sha(p) == digest for p, digest in files)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("raw", type=Path)
@@ -492,24 +543,45 @@ def main():
     manifest = json.loads((raw / "segments.json").read_bytes())
     dest.mkdir(parents=True, exist_ok=True)
     result = {k: manifest[k] for k in ("origin", "rehearsal", "session", "camera")}
+    timeline = dest / "timeline.json"
+    prior = json.loads(timeline.read_text()) if timeline.exists() else {}
+    if prior and any(prior.get(k) != v for k, v in result.items()):
+        raise ValueError("Destination already belongs to another recording camera")
     result["regular_wallet_cleanup"] = manifest.get("cleanup", {})
-    result["scenes"] = {}
+    result["scenes"] = dict(prior.get("scenes", {}))
     for scene in args.scenes.split(","):
         if scene not in SCENES:
             parser.error("Unknown scene")
-        if not all(
-            manifest["segments"]
-            .get("S5-regular" if k == "decision" else f"{scene}-{k}", {})
+        expected = sources_for(scene)
+        present = [
+            kind
+            for kind in expected
+            if manifest["segments"]
+            .get("S5-regular" if kind == "decision" else f"{scene}-{kind}", {})
             .get("status")
             == "captured"
-            for k in sources_for(scene)
-        ):
-            result["scenes"][scene] = {"status": "incomplete", "events": []}
+        ]
+        if not present:
+            result["scenes"][scene] = {
+                "status": "incomplete",
+                "missing_sources": expected,
+                "events": [],
+            }
+            continue
+        signature = input_digest(raw, manifest, scene, args.crf, present)
+        previous = result["scenes"].get(scene, {})
+        if previous.get("input_digest") == signature and intact(dest, scene, previous):
             continue
         with TemporaryDirectory(dir=dest) as d:
             result["scenes"][scene] = compose(
-                raw, dest, manifest, scene, Path(d), args.crf
+                raw, dest, manifest, scene, Path(d), args.crf, present
             )
+        if present != expected:
+            result["scenes"][scene].update(
+                status="partial",
+                missing_sources=[k for k in expected if k not in present],
+            )
+        result["scenes"][scene]["input_digest"] = signature
     tmp = dest / "timeline.json.tmp"
     tmp.write_text(json.dumps(result, indent=2) + "\n")
     tmp.replace(dest / "timeline.json")
