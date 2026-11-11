@@ -364,6 +364,20 @@ def main():
                 if check.testzip():
                     raise ValueError("Archive failed CRC verification")
             archive.replace(args.output)
+        elif args.output.exists():
+            from compose_take import sha
+
+            published = {
+                p.relative_to(args.output).as_posix(): p
+                for p in args.output.rglob("*")
+                if p.is_file()
+            }
+            if published.keys() != inputs.keys() or any(
+                sha(published[n]) != sha(p) for n, p in inputs.items()
+            ):
+                raise ValueError(
+                    "The existing handoff differs from these inputs; choose a fresh output path"
+                )
         else:
             for name, path in files.items():
                 dest = stage / name

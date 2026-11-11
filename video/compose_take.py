@@ -492,6 +492,36 @@ def compose(raw, dest, manifest, scene, tmp, crf):
     }
 
 
+def input_digest(raw, manifest, scene, crf):
+    inputs = [sha(Path(__file__)), crf]
+    for kind in sources_for(scene):
+        target = "S5" if kind == "decision" else scene
+        component = "regular" if kind == "decision" else kind
+        entry = manifest["segments"][target + "-" + component]
+        directory = (raw / entry.get("sourceDir", ".")).resolve()
+        if not directory.is_relative_to(raw):
+            raise ValueError("Source lies outside the sealed camera directory")
+        prefix = target + ("-soak" if component == "soak" else "")
+        hashes = [sha(directory / (prefix + ".webm"))]
+        for mark in entry["events"]:
+            file = directory / (prefix + "-" + mark["label"] + ".png")
+            if file.is_file():
+                hashes.append(sha(file))
+        inputs.append([entry, hashes])
+    return hashlib.sha256(
+        json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def intact(directory, scene, entry):
+    files = [(directory / (scene + ".webm"), entry["video_sha256"])]
+    files.extend(
+        (directory / (scene + "-" + e["label"] + ".png"), e["screenshot_sha256"])
+        for e in entry["events"]
+    )
+    return all(p.is_file() and sha(p) == digest for p, digest in files)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("raw", type=Path)
@@ -512,8 +542,12 @@ def main():
     manifest = json.loads((raw / "segments.json").read_bytes())
     dest.mkdir(parents=True, exist_ok=True)
     result = {k: manifest[k] for k in ("origin", "rehearsal", "session", "camera")}
+    timeline = dest / "timeline.json"
+    prior = json.loads(timeline.read_text()) if timeline.exists() else {}
+    if prior and any(prior.get(k) != v for k, v in result.items()):
+        raise ValueError("Destination already belongs to another recording camera")
     result["regular_wallet_cleanup"] = manifest.get("cleanup", {})
-    result["scenes"] = {}
+    result["scenes"] = dict(prior.get("scenes", {}))
     for scene in args.scenes.split(","):
         if scene not in SCENES:
             parser.error("Unknown scene")
@@ -526,10 +560,15 @@ def main():
         ):
             result["scenes"][scene] = {"status": "incomplete", "events": []}
             continue
+        signature = input_digest(raw, manifest, scene, args.crf)
+        previous = result["scenes"].get(scene, {})
+        if previous.get("input_digest") == signature and intact(dest, scene, previous):
+            continue
         with TemporaryDirectory(dir=dest) as d:
             result["scenes"][scene] = compose(
                 raw, dest, manifest, scene, Path(d), args.crf
             )
+        result["scenes"][scene]["input_digest"] = signature
     tmp = dest / "timeline.json.tmp"
     tmp.write_text(json.dumps(result, indent=2) + "\n")
     tmp.replace(dest / "timeline.json")
