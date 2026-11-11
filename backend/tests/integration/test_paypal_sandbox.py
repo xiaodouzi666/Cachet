@@ -1,6 +1,8 @@
 """Live checks. These create real sandbox authorizations, captures, refunds and payouts."""
 
 import json
+import os
+from pathlib import Path
 import time
 import uuid
 
@@ -149,3 +151,57 @@ def test_recover_committed_writeoff_before_real_void(monkeypatch):
                        "mandate_id":mid, "writeoff_micros":closed["forgiven_micros"], "released_micros":closed["released_micros"]})
         journal.data["completed"] = True
         journal.save()
+
+
+@pytest.mark.sandbox
+def test_watchdog_reconciles_submitted_items_without_webhooks(request, tmp_path, monkeypatch):
+    from sqlalchemy import func, select
+    from backend.app import ledger
+    from backend.app.db import session_scope
+    from backend.app.models import LedgerTxn, PayoutBatch, PayoutItem, Publisher, Workspace, new_id
+    from backend.app.paypal.client import PayPalClient
+    from backend.app.settlement.payout_job import refresh_submitted_payouts
+    from backend.app.settlement.service import cents
+
+    journal_path = os.environ.get("CACHET_PAYOUT_READBACK_JOURNAL")
+    if journal_path:
+        payouts = json.loads(Path(journal_path).read_text())
+        assert payouts["completed"] and payouts["scenario"] in ("payout", "all")
+    else:
+        _, payouts = request.getfixturevalue("wallet_and_payouts")
+    provider_id = payouts["readbacks"]["payout.batch"]["id"]
+    with PayPalClient.from_env() as pp:
+        receipt = pp.get_payout(provider_id)
+    header = receipt["batch_header"]
+    assert header["batch_status"] == "SUCCESS"
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(tmp_path / "pending-items.sqlite"))
+    with session_scope() as db:
+        ws = Workspace(cookie_id=new_id(), kind="judge")
+        db.add(ws)
+        db.flush()
+        # The confirmed header arrived before the original item statuses or any postings.
+        batch = PayoutBatch(workspace_id=ws.id, status=header["batch_status"], paypal_batch_id=provider_id,
+                            sender_batch_id=header["sender_batch_header"]["sender_batch_id"])
+        unsubmitted = PayoutBatch(workspace_id=ws.id, status="CREATED", sender_batch_id=new_id())
+        db.add_all([batch, unsubmitted])
+        db.flush()
+        wid, bid, untouched = ws.id, batch.id, unsubmitted.id
+        expected = {}
+        for row in receipt["items"]:
+            detail = row["payout_item"]
+            owner = Publisher(workspace_id=wid, name=detail["sender_item_id"], paypal_receiver_email=detail["receiver"])
+            db.add(owner)
+            db.flush()
+            db.add(PayoutItem(id=detail["sender_item_id"], batch_id=bid, workspace_id=wid, publisher_id=owner.id,
+                              amount_cents=cents(detail["amount"]), status="PENDING"))
+            expected[row["payout_item_id"]] = (cents(detail["amount"]), cents(row["payout_item_fee"]))
+    for _ in range(2):
+        refresh_submitted_payouts()
+        with session_scope(write=False) as db:
+            items = list(db.scalars(select(PayoutItem).where(PayoutItem.batch_id == bid)))
+            assert len(items) == 2 and all(item.status == "SUCCESS" for item in items)
+            assert {item.paypal_item_id: (item.amount_cents, item.fee_cents) for item in items} == expected
+            assert db.get(PayoutBatch, untouched).paypal_batch_id is None
+            assert db.scalar(select(func.count()).select_from(PayoutBatch)) == 2
+            assert db.scalar(select(func.count()).select_from(LedgerTxn).where(LedgerTxn.ref_type == "payout")) == 2
+            assert ledger.assert_invariants(db, workspace_id=wid) == -sum(a + f for a, f in expected.values()) * 10000

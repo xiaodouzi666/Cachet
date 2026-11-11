@@ -12,7 +12,7 @@ from backend.app.models import AgentRun, Call, LedgerEntry, Mandate, Workspace, 
 from backend.app.operations import Control, RunEvent
 from backend.app.paypal.reconciliation import reconcile
 from backend.app.settlement.audit import audit
-from backend.app.settlement.payout_job import settle
+from backend.app.settlement.payout_job import refresh_submitted_payouts, settle
 from backend.app.settlement.service import capture, close
 
 LOG = logging.getLogger(__name__)
@@ -59,6 +59,10 @@ def maintain():
         retry_pending()
     except Exception:
         LOG.exception("Could not reproject pending verified webhooks")
+    try:
+        refresh_submitted_payouts()
+    except Exception:
+        LOG.exception("Could not read submitted PayPal payout batches")
     now = utcnow()
     end_idle_runs(now)
     with session_scope(write=False) as db:

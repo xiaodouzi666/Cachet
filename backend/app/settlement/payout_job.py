@@ -1,10 +1,11 @@
 from datetime import timedelta
 import hashlib
 import json
+import logging
 
 from fastapi import HTTPException
 
-from sqlalchemy import select
+from sqlalchemy import func, literal, select
 from backend.app import ledger
 from backend.app.api.access import owned
 from backend.app.config import value
@@ -17,9 +18,47 @@ from backend.app.models import (
     new_id,
     utcnow,
 )
+from backend.app.operations import Control
 from backend.app.money import usd_to_micros
 from backend.app.paypal.client import PayPalClient, request_id
 from backend.app.settlement.service import cents, lock
+
+
+LOG = logging.getLogger(__name__)
+POLL_PREFIX = "payout-readback:"
+OPEN_BATCH = ("CREATED", "PENDING", "PROCESSING")
+OPEN_ITEM = ("NEW", "PENDING", "PROCESSING", "ONHOLD", "UNCLAIMED")
+
+
+def refresh_submitted_payouts():
+    """Poll four already-submitted batches, oldest attempt first, across all workspaces."""
+    now = utcnow().timestamp()
+    open_items = select(PayoutItem.id).where(
+        PayoutItem.batch_id == PayoutBatch.id, PayoutItem.status.in_(OPEN_ITEM)
+    ).exists()
+    last = func.coalesce(Control.data["at"].as_float(), 0)
+    due = (select(PayoutBatch.workspace_id, PayoutBatch.id)
+           .outerjoin(Control, Control.key == literal(POLL_PREFIX) + PayoutBatch.id)
+           .where(PayoutBatch.paypal_batch_id.is_not(None), PayoutBatch.paypal_batch_id != "",
+                  PayoutBatch.status.in_(OPEN_BATCH) | open_items, last <= now - 30)
+           .order_by(last, PayoutBatch.created_at, PayoutBatch.id).limit(4))
+    with session_scope(write=False) as db:
+        if not db.execute(due).first():
+            return
+    # BEGIN IMMEDIATE prevents overlapping workers from taking the same due entries.
+    # Record the attempt before the GET so an unavailable batch cannot starve later ones.
+    with session_scope() as db:
+        jobs = db.execute(due).all()
+        for _, batch_id in jobs:
+            db.merge(Control(key=POLL_PREFIX + batch_id, data={"at": now}))
+    if jobs:
+        with PayPalClient.from_env() as pp:
+            for ws, batch_id in jobs:
+                try:
+                    with lock(ws):
+                        refresh_batch(pp, ws, batch_id)
+                except Exception:
+                    LOG.exception("Could not refresh submitted payout batch %s", batch_id)
 
 
 def refresh_batch(pp, ws, batch_id):
@@ -34,6 +73,8 @@ def refresh_batch(pp, ws, batch_id):
         raise ValueError("PayPal batch identity differs")
     with session_scope() as db:
         b = db.get(PayoutBatch, batch_id)
+        if b.status in ("SUCCESS", "CANCELED", "DENIED") and hdr["batch_status"] != b.status:
+            raise ValueError("A PayPal readback differs from the known terminal batch status")
         for row in info.get("items", []):
             p = row["payout_item"]
             item = db.get(PayoutItem, p["sender_item_id"])
