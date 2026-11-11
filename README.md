@@ -197,7 +197,7 @@ With Docker running, verify the actual final modules over loopback HTTP inside n
 
 ## Limitations and fallbacks
 
-A fresh Compose deployment can display archived results without credentials. Funding, capture, refund and payout require actual PayPal Sandbox accounts. Free-text coding tasks require a live model. Replay accepts the recorded tasks and quote inputs (25% cold for buy, 0% for compute), and explicitly identifies their original model output. A verified independent hosted engine and its calibration must be provisioned before that mode can serve calls. [Supported modes](docs/deployment.md)
+A fresh Compose deployment can display archived results without credentials. Funding, capture, refund and payout require actual PayPal Sandbox accounts. The coding agent offers two built-in framework tasks. Free-text tasks are disabled because the current model did not reliably meet custom response-format requirements. Existing custom run records remain available for audit. Replay accepts the recorded tasks and quote inputs (25% cold for buy, 0% for compute), and explicitly identifies their original model output. A verified independent hosted engine and its calibration must be provisioned before that mode can serve calls. [Supported modes](docs/deployment.md)
 
 Cachet measures time to first text over the selected route. Network latency affects that measurement. Calibrate a public API’s actual path to its GPU before comparing a live turn with its SLA. Sandbox Transaction Search can lag, and a confirmed payout batch still requires successful individual payee items. Current measurements describe the tested GPU and sandbox account. [Calibration](docs/inference-registration.md) · [Settlement details](docs/pricing.md)
 

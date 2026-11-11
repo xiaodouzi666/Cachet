@@ -442,6 +442,8 @@ def start(body: Start, bg: BackgroundTasks, request: Request, ws=wsdep):
 
 
 def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, sponsor_sequence=None, guided_main=False):
+    if body.task_text is not None:
+        raise HTTPException(422, "Custom tasks are unavailable. Select a built-in task.")
     serving = health()
     mode = serving["mode"]
     profile = calibration(mode)
@@ -498,17 +500,12 @@ def start_run(body, bg, request, ws, *, soak_sequence=None, guided_parent=None, 
             )
         ):
             raise HTTPException(409, "A run is already using this mandate")
-        if body.task_text is not None:
-            if mode not in {"live", "hosted"}:
-                raise HTTPException(422, "Free-text tasks require live inference")
-            task = body.task_text
-            key = "custom"
-        elif body.task_id in TASKS and (TASKS[body.task_id][0] == ctx.slug or (guided_parent and ctx.slug == "fastapi")):
+        if body.task_id in TASKS and (TASKS[body.task_id][0] == ctx.slug or (guided_parent and ctx.slug == "fastapi")):
             key = body.task_id
             task = TASKS[key][1]
         else:
             raise HTTPException(
-                422, "Select a built-in task for this context or supply a custom task"
+                422, "Select a built-in task for this context"
             )
         if soak_marker is None and sponsor_sequence is None:
             limit(db, ["runs:" + ws], 3, 3600)

@@ -262,7 +262,6 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
     tasks = useResource<Task[]>("tasks");
   const [contextId, setContext] = useState(""),
     [taskId, setTask] = useState(""),
-    [custom, setCustom] = useState(""),
     [fraction, setFraction] = useState("0.25");
   const [quote, setQuote] = useState<Quote | null>(null),
     [run, setRun] = useState<Run | null>(null),
@@ -279,8 +278,7 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
   );
   const selected =
     availableTasks?.find((t) => t.id === taskId) || availableTasks?.[0];
-  const actualTask = taskId === "custom" ? "custom" : selected?.id;
-  const isCustom = taskId === "custom";
+  const actualTask = selected?.id;
   const turnCount = selected?.turns || tasks.data?.[0]?.turns;
   const observed = session.state?.run;
   const currentRun =
@@ -312,7 +310,6 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
           ...params,
           mandate_id: mandate.id,
           task_id: actualTask,
-          task_text: isCustom ? custom : undefined,
         });
         setRun({ id: r.run_id, status: r.status });
         void session.refresh().catch((e) => setError(describe(e)));
@@ -334,6 +331,7 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
             <h2>Task and quote</h2>
             <p>
               Compare a warm shared prefix with the agent’s own cached context.
+              Choose a built-in task for the selected framework.
             </p>
           </div>
         </div>
@@ -389,24 +387,8 @@ export function Agent({ showWallet = true }: { showWallet?: boolean }) {
                     {t.title}
                   </option>
                 ))}
-                {(health.data?.mode === "live" ||
-                  health.data?.mode === "hosted") && (
-                  <option value="custom">Custom task</option>
-                )}
               </select>
             </label>
-            {isCustom && (
-              <label className="field full">
-                Task instructions
-                <textarea
-                  maxLength={1500}
-                  required
-                  rows={3}
-                  value={custom}
-                  onChange={(e) => setCustom(e.target.value)}
-                />
-              </label>
-            )}
             <label className="field">
               Task turns
               <input aria-readonly="true" readOnly value={turnCount ?? "—"} />
