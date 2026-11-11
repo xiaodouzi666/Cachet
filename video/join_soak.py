@@ -106,4 +106,3 @@ if __name__ == "__main__":
     if latest.parent != camera or output.parent != camera:
         parser.error("Use private directories inside the same camera's source folder")
     print(json.dumps(join(camera, args.scene, latest, output, args.key_digest)))
-
