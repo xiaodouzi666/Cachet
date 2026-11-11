@@ -11,6 +11,20 @@ from backend.app.db import init_db, session_scope
 from backend.app.models import Consumer, Mandate, Workspace
 
 
+def test_structured_intent_preserves_id_and_never_proposes_for_a_negation(monkeypatch):
+    from backend.app.agents import copilot
+
+    key = uuid4().hex
+    monkeypatch.setattr(copilot, "chat", lambda *_: {"tool": "unsupported", "arguments": {}})
+    tools = copilot.LOCAL_DEFINITIONS
+    assert copilot.route(f"Refund call {key}.", tools) == ("propose_refund", {"call_id": key})
+    assert copilot.route(f"Do not refund call {key}.", tools) == ("unsupported", {})
+    assert copilot.route(f"Where did the money from mandate {key} go?", tools) == (
+        "mandate_breakdown", {"mandate_id": key})
+    assert copilot.route("How much did Starlette earn this week?", tools) == (
+        "publisher_earnings", {"days": 7})
+
+
 def test_new_workspace_evidence_and_scoped_mandate(tmp_path):
     engine = init_db(f"sqlite:///{tmp_path}/evidence.db")
     with session_scope(engine) as db:

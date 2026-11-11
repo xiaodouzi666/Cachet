@@ -102,6 +102,18 @@ def chat(messages, max_tokens):
 
 
 def route(question, definitions):
+    # Resolve common, explicit requests locally. Every public record lookup still
+    # runs inside the workspace check, and a refund only creates a proposal.
+    identifier = r"([0-9a-f]{32})"
+    mandate = re.fullmatch(r"where did the money from mandate " + identifier + r" go[?]?", question, re.I)
+    if mandate:
+        return "mandate_breakdown", {"mandate_id": mandate.group(1)}
+    refund = re.fullmatch(r"(?:please )?refund call " + identifier + r"[.!]?", question, re.I)
+    if refund:
+        return "propose_refund", {"call_id": refund.group(1)}
+    weekly = re.fullmatch(r"how much did (?:starlette|fastapi) earn this week(?:,? and why [^?]+)?[?]?", question, re.I)
+    if weekly:
+        return "publisher_earnings", {"days": 7}
     catalog = [{k: d["function"][k] for k in ("name", "description", "parameters")} for d in definitions]
     system = (
         "You are Cachet's read-only operations agent. Choose the one evidence tool that best answers the user's "
