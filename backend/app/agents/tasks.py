@@ -137,7 +137,46 @@ def rate_limit_window_diagnostic(source):
     return ""
 
 
-def diagnostic(text, task, *, prompt_version=9):
+def custom_output_format_diagnostic(text, task):
+    """Report explicit custom output-format conflicts without changing the answer."""
+    if task in CONTRACTS or not (
+        re.search(r"\b(?:python|starlette|fastapi)\b", task, re.I)
+        and re.search(r"\b(?:module|application|app|code)\b", task, re.I)
+    ):
+        return ""
+    no_explanation = re.search(
+        r"\b(?:no|without)\s+(?:markdown\s+or\s+)?(?:explanations?|prose|commentary)\b",
+        task, re.I,
+    )
+    raw_module = re.search(
+        r"\b(?:raw|plain|unfenced)\s+(?:python\s+)?(?:module|code)\b", task, re.I,
+    )
+    no_fences = re.search(
+        r"\b(?:no|without)\s+(?:any\s+)?(?:markdown|(?:code\s+)?fences?|backticks?)\b"
+        r"|\b(?:do\s+not|don't)\s+(?:use|include|add)\s+(?:any\s+)?(?:markdown|(?:code\s+)?fences?)\b",
+        task, re.I,
+    )
+    if (raw_module or no_fences) and re.search(r"(?m)^[ \t]*(?:`{3,}|~{3,})", text):
+        if raw_module or no_explanation:
+            return (
+                "The previous answer violated the requested raw Python format: it contains a Markdown code fence. "
+                "Output the first Python statement directly. Do not output opening or closing triple backticks, "
+                "a python language label, or explanatory text."
+            )
+        return (
+            "The previous answer violated the no-Markdown requirement: it contains a Markdown code fence. "
+            "Do not output opening or closing triple backticks or a language label. "
+            "Retain any plain explanation the user requested and follow the remaining task requirements."
+        )
+    if no_explanation and FENCE.search(text) and FENCE.sub("", text).strip():
+        return (
+            "The previous answer violated the no-explanation requirement: text appeared outside its code block. "
+            "Return only the requested module, preserving the user's requested code-block format."
+        )
+    return ""
+
+
+def diagnostic(text, task, *, prompt_version=10):
     """Check syntax and static AST hints without importing or executing generated source."""
     blocks = FENCE.findall(text)
     if not blocks:
@@ -212,7 +251,7 @@ def requests_module(task, step, *, builtin_task=True):
     return builtin_task and task in CONTRACTS and step in (5, 8, 9)
 
 
-def turn_question(task, step, instruction, *, previous="", http_feedback=None, prompt_version=9):
+def turn_question(task, step, instruction, *, previous="", http_feedback=None, prompt_version=10):
     contract = CONTRACTS.get(task, "")
     if not contract:
         if prompt_version >= 9 and step in (5, 8, 9):
@@ -281,4 +320,8 @@ def turn_question(task, step, instruction, *, previous="", http_feedback=None, p
             q += "\nRepeat the preceding working module verbatim, including all its imports, in a single fenced python block."
         else:
             q += "\nCorrect the actual error above using the framework reference. Return the entire corrected module."
+    if prompt_version >= 10:
+        format_hint = custom_output_format_diagnostic(previous, task)
+        if format_hint:
+            q += "\nOutput format check of the preceding answer:\n" + format_hint
     return q
