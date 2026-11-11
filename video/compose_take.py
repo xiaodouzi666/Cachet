@@ -369,6 +369,7 @@ def compose(raw, dest, manifest, scene, tmp, crf, kinds):
             for w in entry.get("waits", [])
             if w["reason"]
             in {
+                "provider-status-wait",
                 "server-retry-after",
                 "document-navigation",
                 "separate-sandbox-approval-window",

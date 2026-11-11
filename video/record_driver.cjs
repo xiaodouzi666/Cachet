@@ -51,6 +51,7 @@ async function restoreSubmittedSoak(scene, cameras, sourceDir, pair) {
       [path.join(__dirname, "join_soak.py"), camera.dir, scene, sourceDir, joinedDir, digest]);
     const joined = JSON.parse(stdout);
     view.events = joined.events;
+    view.waits = joined.waits;
     view.evidence.observationParts = joined.observationParts;
     const events = view.events.filter(event => event.label === label && event.actionKey === id);
     assert(events.length === 1 && events[0].utc, "The recovered footage lacks its original browser request.");

@@ -75,8 +75,14 @@ def join(camera, scene, latest, output, key_digest):
             elif not event.get("actionKey"):
                 raise ValueError("Missing screenshot for original recorded milestone")
             events.append(event)
+    waits = [
+        {**wait, "start_ms": wait["start_ms"] + offset, "end_ms": wait["end_ms"] + offset}
+        for record, offset in ((first, 0), (finished, durations[0]))
+        for wait in record.get("waits", [])
+    ]
     proof = {
         "events": events,
+        "waits": waits,
         "observationParts": [
             {"phase": phase, "source_sha256": sha(source), "duration_ms": duration}
             for phase, source, duration in zip(("original-submission", "subsequent-readback"), files, durations)
