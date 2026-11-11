@@ -95,7 +95,7 @@ async function markSandboxApproval(popup,frame,button,mark,amount) {
 }
 
 async function approve(page,state,mark=quietMark,
-                       {walletOnly=false,waitForEvidence=(_,fn)=>fn(),onOrder=async()=>{}}={}) {
+                       {walletOnly=false,expectedWalletCapMicros,filmProviderControl=false,waitForEvidence=(_,fn)=>fn(),onOrder=async()=>{}}={}) {
   if(!walletOnly && state.card_enabled){
     await page.getByRole("button",{name:"Use sandbox test card"}).click();
     await expect.poll(async()=>Boolean((await readState(page)).mandate?.authorization_id),{timeout:75000}).toBe(true);
@@ -113,14 +113,14 @@ async function approve(page,state,mark=quietMark,
       return Boolean(order?.payment_method==="wallet" && ["CREATED","APPROVED"].includes(order.status) &&
         order.paypal_order_id && Number.isSafeInteger(order.cap_micros) && order.cap_micros>0 && order.cap_micros%10000===0);
     },{timeout:30000,message:"Waiting for this workspace's sandbox order"}).toBe(true);
-    if(walletOnly)expect(order.cap_micros).toBe(5000000);
+    if(expectedWalletCapMicros!==undefined)expect(order.cap_micros).toBe(expectedWalletCapMicros);
     await onOrder({mandateId:order.id,orderId:order.paypal_order_id});
     const amount=(order.cap_micros/1e6).toFixed(2);
     try{
       await waitForEvidence("separate-sandbox-approval-window",()=>approveSandboxPopup(popup,{
         orderId:order.paypal_order_id,expectedUsd:amount,email:state.sandbox_buyer_email,
         password:state.sandbox_buyer_password,returnUrl:new URL(page.url()).origin,
-        beforeApproval:walletOnly ? async(frame,button)=>{
+        beforeApproval:filmProviderControl ? async(frame,button)=>{
           if(!filmed){await markSandboxApproval(popup,frame,button,mark,amount);filmed=true;}
         }:undefined,
       }));
@@ -336,7 +336,7 @@ const scenes = {
     expect(state.kind).toBe("judge");
     expect(state.mandate).toBeFalsy();
     await page.getByLabel("Budget (USD)", {exact:true}).fill("5.00");
-    const approval=await approve(page,state,mark,{walletOnly:true,waitForEvidence,onOrder:checkpoint});
+    const approval=await approve(page,state,mark,{walletOnly:true,expectedWalletCapMicros:5_000_000,filmProviderControl:true,waitForEvidence,onOrder:checkpoint});
     expect(approval.verifiedProviderControlFilmed,"Film the original approval control before continuing the regular wallet take").toBe(true);
     const mandate = (await readState(page)).mandate;
     expect(mandate.cap_micros).toBe(5000000);

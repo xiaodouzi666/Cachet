@@ -85,11 +85,12 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
           sandbox_buyer_password: password,
         },
         async () => {},
-        { walletOnly: true },
+        { walletOnly: true, expectedWalletCapMicros: 1_000_000 },
       );
       person = await read(raw, "judge/state");
     }
     expect(person.mandate.payment_method).toBe("wallet");
+    expect(person.mandate.cap_micros).toBe(1_000_000);
     expect(person.mandate.status).toBe("ACTIVE");
     active = person.mandate.id;
     const catalogPage = await direct.newPage();
