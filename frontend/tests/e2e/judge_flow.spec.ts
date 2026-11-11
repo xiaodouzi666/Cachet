@@ -43,6 +43,14 @@ test("completes six real judge steps and reconciles two funded recipients", asyn
     initial.contexts.every((c: any) => c.status === "hot" && c.probe >= 0.95),
   ).toBe(true);
 
+  const privateState = process.env.CACHET_B7_BROWSER_STATE;
+  if (privateState) {
+    // Keep the original workspace available for provider readback after an interruption.
+    const state = await page.context().storageState();
+    expect(state.cookies.some((cookie) => cookie.name === "cachet_workspace")).toBe(true);
+    await writeFile(privateState, JSON.stringify(state), { flag: "wx", mode: 0o600 });
+  }
+
   await status(2).click();
   await page.getByRole("button", { name: "Use sandbox test card" }).click();
   await completed(2);
