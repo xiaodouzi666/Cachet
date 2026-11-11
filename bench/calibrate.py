@@ -26,6 +26,9 @@ def render(data):
     top, bottom, left, right = 310, 845, 200, 1780
     values = [b[k] for b in data["bands"] for k in ("cold_p50_ms","warm_p50_ms")]
     low, high = math.floor(math.log10(min(values))), math.ceil(math.log10(max(values)))
+    lengths = [b["prefix_tokens"] for b in data["bands"]]
+    def x(tokens):
+        return left + (tokens - lengths[0]) * (right - left) / (lengths[-1] - lengths[0])
     def y(v):
         return bottom - (math.log10(v)-low) * (bottom-top) / (high-low)
     for n in range(low, high+1):
@@ -34,7 +37,7 @@ def render(data):
         draw.text((left-20,yy),f"{10**n:,}",font=font(25),fill="#374151",anchor="rm")
     draw.text((110,245),"Milliseconds · logarithmic scale",font=font(26),fill="#374151")
     for j, (field, color, label) in enumerate((("cold_p50_ms","#374151","Cold"),("warm_p50_ms","#0f766e","Warm"))):
-        points = [(left+i*(right-left)/(len(data['bands'])-1),y(b[field])) for i,b in enumerate(data["bands"])]
+        points = [(x(b["prefix_tokens"]), y(b[field])) for b in data["bands"]]
         draw.line(points,fill=color,width=7)
         for (xx,yy),band in zip(points,data["bands"]):
             draw.ellipse((xx-9,yy-9,xx+9,yy+9),fill=color)
@@ -42,6 +45,7 @@ def render(data):
             if j==0:
                 draw.text((xx,bottom+24),f"{band['prefix_tokens']//1000}k",anchor="mt",font=font(29),fill="#111827")
         draw.text((1400+j*185,242),label,font=font(32),fill=color)
+    draw.text(((left + right) / 2, 908), "Prefix length (tokens)", anchor="mt", font=font(27), fill="#374151")
     pairs = len(data["bands"][0]["runs"])
     draw.text((110,970),f"Client-observed median of {pairs} cold/warm pairs per length. Each pair begins with a verified cache flush.",font=font(27),fill="#374151")
     PLOT.parent.mkdir(exist_ok=True)
