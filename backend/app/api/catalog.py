@@ -290,7 +290,7 @@ def flush_and_schedule_rewarm(ws):
     with _rewarm_lock:
         try:
             with Engine() as engine:
-                engine.flush(timeout_s=60)
+                engine.flush(timeout_s=30)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 400:
                 raise HTTPException(409, "The GPU could not flush while requests were active.") from exc

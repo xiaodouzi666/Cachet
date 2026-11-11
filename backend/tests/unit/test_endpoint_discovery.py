@@ -98,3 +98,41 @@ def test_quick_dns_recovery_keeps_tls_identity(monkeypatch):
         assert http.get(ORIGIN + "/health").is_success
     assert str(recorded[0].url) == "https://104.16.230.132/health"
     assert recorded[0].headers["host"] == host and recorded[0].extensions["sni_hostname"] == host
+
+
+def test_judge_flush_through_registered_proxy(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from backend.app.api import catalog, finance
+    from backend.app.gateway import sglang_client
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/judge.sqlite")
+    monkeypatch.setenv("INFERENCE_ENDPOINT_MODE", "registered")
+    monkeypatch.setenv("SGLANG_API_KEY", "test-native")
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
+    monkeypatch.setenv("PUBLIC_WEB_URL", "https://testserver")
+    monkeypatch.setattr(registration, "active", lambda: META)
+    monkeypatch.setattr(modes, "_state", None)
+    state = tmp_path / "edge.json"
+    state.write_text('{"url":"' + ORIGIN + '"}')
+    monkeypatch.setattr(gpu_proxy, "STATE", state)
+    relayed = []
+
+    async def accept(request, *, stream):
+        relayed.append((request.method, request.url, request.headers["authorization"]))
+        return httpx.Response(200)
+
+    api = FastAPI()
+    api.include_router(finance.router)
+    with TestClient(gpu_proxy.app) as proxy, TestClient(api, base_url="https://testserver") as client:
+        monkeypatch.setattr(proxy.app.state.engine, "send", accept)
+        monkeypatch.setattr(sglang_client, "TunnelTransport", lambda _: httpx.MockTransport(proxy.send))
+        client.headers["X-Admin-Token"] = "test-admin"
+        workspace = client.post("/api/judge/workspace", json={"kind": "judge"}).raise_for_status().json()
+        receipt = client.post("/api/judge/flush-cache").raise_for_status().json()
+        catalog.observed_live_call(workspace["workspace_id"], receipt["flush_id"])
+
+    assert len(relayed) == 1
+    method, url, authorization = relayed[0]
+    assert method == "POST" and url.path == "/flush_cache"
+    assert 1 <= int(url.params["timeout"]) <= 30
+    assert authorization == "Bearer test-native"
