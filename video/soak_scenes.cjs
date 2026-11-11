@@ -136,7 +136,7 @@ async function cameras(browser,b,dirs,scene){
       const scratch=await fs.mkdtemp(path.join(dir,".soak-"));
       const context=await browser.newContext({baseURL:b.web,viewport:{width:1920,height:1080},deviceScaleFactor:1,
         locale:"en-US",recordVideo:{dir:scratch,size:{width:1920,height:1080}}});
-      const cam={dir,scratch,context,scene,binding:b,events:[],page:null,start:0};
+      const cam={dir,scratch,context,scene,binding:b,events:[],waits:[],page:null,start:0};
       cams.push(cam);
       await context.addCookies([{name:"cachet_workspace",value:b.cookie,url:b.web,secure:b.web.startsWith("https:"),httpOnly:true,sameSite:"Lax"}]);
       await context.addInitScript(()=>{
@@ -153,7 +153,7 @@ async function finish(cam,success){
   const video=cam.page.video();
   try{
     await fs.writeFile(path.join(cam.dir,cam.scene+"-soak-source-events.json"),
-      JSON.stringify({status:success?"captured":"incomplete",events:cam.events},null,2)+"\n",{mode:0o600});
+      JSON.stringify({status:success?"captured":"incomplete",events:cam.events,waits:cam.waits},null,2)+"\n",{mode:0o600});
     if(success)await cam.page.evaluate(()=>new Promise(resolve=>{
       let n=8;const tick=()=>--n?requestAnimationFrame(tick):resolve();requestAnimationFrame(tick);
     }));
@@ -313,6 +313,16 @@ async function savedBatch(b, batchId){
     "The original batch receipt is bound to another action");
   return value.batchId;
 }
+async function providerWait(cams, task) {
+  const start=performance.now();
+  try { return await task(); }
+  finally {
+    const stop=performance.now();
+    if(stop-start>=5000) for(const cam of cams) cam.waits.push({
+      reason:"provider-status-wait",start_ms:Math.round(start-cam.start),end_ms:Math.round(stop-cam.start),
+    });
+  }
+}
 async function payoutShot(cams,b){
   const page=cams[0].page;
   const current=(await liveWorkspace(page,b)).mandate;
@@ -353,13 +363,13 @@ async function payoutShot(cams,b){
     }
   }
   const knownBatch=await savedBatch(b);
-  const batch=await waitFor(page,async()=>{
+  const batch=await providerWait(cams,()=>waitFor(page,async()=>{
     const candidates=(await get(page,"payouts")).filter(x=>knownBatch?x.id===knownBatch:!previous.existing_batches.includes(x.id));
     check(candidates.length<=1,"Multiple later batches require inspection of the original recording");
     const x=candidates[0];
     if(x && x.status==="SUCCESS" && x.items?.length===2 && x.items.every(i=>i.status==="SUCCESS"&&payees[i.publisher_id]&&i.paypal_item_id))return x;
     return null;
-  },180000);
+  },180000));
   await savedBatch(b,batch.id);
   const {caps}=await cashEvidence(page,b);
   const verified=await provider({order:b.order,authorization:b.auth,captures:caps.map(c=>c.paypal_capture_id),
@@ -401,7 +411,7 @@ async function recordSoakSegment(options){
     }
     const evidence=await ({S5:capturesShot,S6:closingShot,S7:payoutShot}[scene])(cams,b);
     success=true;
-    return cams.map((cam,i)=>({events:cam.events,evidence:{...evidence,camera:i+1,rehearsal}}));
+    return cams.map((cam,i)=>({events:cam.events,waits:cam.waits,evidence:{...evidence,camera:i+1,rehearsal}}));
   }finally{
     const saved=await Promise.allSettled(cams.map(c=>finish(c,success)));
     const failed=saved.find(s=>s.status==="rejected");
