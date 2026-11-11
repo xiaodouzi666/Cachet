@@ -1,4 +1,11 @@
-"""Provider event names used by the local receiver and its registration."""
+"""Provider event names and evidence recorded by the signature-verifying receiver."""
+
+import time
+from urllib.parse import urlsplit
+
+import httpx
+
+from .client import resource_id, settings
 
 EVENTS = frozenset({
     "CHECKOUT.ORDER.APPROVED",
@@ -19,7 +26,8 @@ def expected_deliveries(wallet, payouts):
     return {
         "CHECKOUT.ORDER.APPROVED": {w[key + ".order"]["id"] for key in ("multi", "partial", "unused")},
         "PAYMENT.AUTHORIZATION.CREATED": {w[key + ".authorization"]["id"] for key in ("multi", "partial", "unused")},
-        "PAYMENT.AUTHORIZATION.VOIDED": {v["id"] for key, v in w.items() if key.endswith(".void")},
+        "PAYMENT.AUTHORIZATION.VOIDED": {w[key + ".void"]["id"] for key in ("partial", "unused")} |
+                                        {v["id"] for key, v in w.items() if key.endswith(".void")},
         "PAYMENT.CAPTURE.COMPLETED": {w[key + ".capture"]["id"] for key in
                                       ("multi.first", "multi.second", "multi.final", "partial.first")},
         "PAYMENT.CAPTURE.REFUNDED": {w["multi.refund"]["id"]},
@@ -28,31 +36,98 @@ def expected_deliveries(wallet, payouts):
     }
 
 
-def delivery_evidence(wallet, payouts):
-    """Read only verified deliveries observed by our actual receiver, omitting personal data."""
-    from sqlalchemy import select
-    from backend.app.db import session_scope
+def verified_receipt(session, identifier, event_type=None):
+    """Project a verified row, including PayPal's alternate payout resource keys."""
+    from sqlalchemy import or_, select
     from backend.app.models import WebhookEvent
 
-    expected = expected_deliveries(wallet, payouts)
-    found = {kind: set() for kind in expected}
-    evidence = []
-    with session_scope(write=False) as session:
-        events = session.scalars(select(WebhookEvent).where(
-            WebhookEvent.verified.is_(True), WebhookEvent.event_type.in_(EVENTS),
-        ))
-        for event in events:
-            payload = event.raw_json.get("resource", {})
-            ids = {event.resource_id, payload.get("id"), payload.get("payout_item_id"),
-                   payload.get("batch_header", {}).get("payout_batch_id")}
-            matched = ids & expected[event.event_type]
-            if matched:
-                found[event.event_type].update(matched)
-                evidence.append({"event_id": event.paypal_event_id, "event_type": event.event_type,
-                                 "resource_ids": sorted(matched), "verified": True,
-                                 "received_at": event.received_at.isoformat()})
-    missing = {kind: sorted(expected[kind] - found[kind]) for kind in expected if expected[kind] - found[kind]}
+    rid = resource_id(identifier)
+    matches = [WebhookEvent.resource_id == rid]
+    query = select(WebhookEvent.paypal_event_id, WebhookEvent.event_type,
+                   WebhookEvent.received_at, WebhookEvent.processed_at).where(WebhookEvent.verified.is_(True))
+    if event_type is not None:
+        if event_type not in EVENTS:
+            raise ValueError("Unknown PayPal webhook event type.")
+        query = query.where(WebhookEvent.event_type == event_type)
+        resource = WebhookEvent.raw_json["resource"]
+        matches.append(resource["id"].as_string() == rid)
+        if event_type == "PAYMENT.PAYOUTSBATCH.SUCCESS":
+            matches.extend([resource["payout_batch_id"].as_string() == rid,
+                            resource["batch_header"]["payout_batch_id"].as_string() == rid])
+        elif event_type == "PAYMENT.PAYOUTS-ITEM.SUCCEEDED":
+            matches.append(resource["payout_item_id"].as_string() == rid)
+    row = session.execute(query.where(or_(*matches)).order_by(
+        WebhookEvent.received_at.desc(), WebhookEvent.id.desc()).limit(1)).first()
+    if row is None:
+        return None
+    return {"event_id": row.paypal_event_id, "type": row.event_type, "resource_id": rid,
+            "verified": True, "received_at": row.received_at.isoformat(),
+            "processed_at": row.processed_at.isoformat() if row.processed_at else None}
+
+
+def _collect_receipts(expected, read):
+    evidence, missing = [], {}
+    event_ids = set()
+    for event_type, identifiers in expected.items():
+        for rid in sorted(identifiers):
+            receipt = read(resource_id(rid), event_type)
+            if (not receipt or receipt.get("verified") is not True or receipt.get("type") != event_type
+                    or receipt.get("resource_id") != rid or not receipt.get("event_id") or not receipt.get("received_at")):
+                missing.setdefault(event_type, []).append(rid)
+                continue
+            if receipt["event_id"] in event_ids:
+                raise ValueError("A single PayPal event cannot attest two journal operations.")
+            event_ids.add(receipt["event_id"])
+            evidence.append({"event_id": receipt["event_id"], "event_type": event_type, "resource_ids": [rid],
+                             "verified": True, "received_at": receipt["received_at"]})
     return {"verified_deliveries": evidence, "missing": missing}
+
+
+def _remote_receipts(expected, config):
+    # Only the separately bound receiver origin can receive the production operator key.
+    origin = (config.get("PRODUCTION_API_URL") or "").rstrip("/")
+    parsed = urlsplit(origin)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.path or parsed.query or parsed.fragment
+            or not config.get("PRODUCTION_ADMIN_TOKEN")):
+        raise ValueError("Configure the bound HTTPS PRODUCTION_API_URL and its PRODUCTION_ADMIN_TOKEN.")
+    with httpx.Client(base_url=origin, headers={"X-Admin-Token": config["PRODUCTION_ADMIN_TOKEN"]},
+                      timeout=15, follow_redirects=False) as client:
+        def read(rid, kind):
+            response = client.get("/api/operator/webhook-receipts/" + rid, params={"event_type": kind})
+            if response.status_code == 404:
+                return None
+            return response.raise_for_status().json()
+        return _collect_receipts(expected, read)
+
+
+def delivery_evidence(wallet, payouts):
+    """Check the actual receiver bound to the sandbox subscription for these operations."""
+    from backend.app.db import session_scope
+
+    expected = expected_deliveries(wallet, payouts)
+    config = settings()
+    if config.get("PRODUCTION_PAYPAL_WEBHOOK_ID") and config["PRODUCTION_PAYPAL_WEBHOOK_ID"] == config.get("PAYPAL_WEBHOOK_ID"):
+        return _remote_receipts(expected, config)
+    with session_scope(write=False) as session:
+        return _collect_receipts(expected, lambda rid, kind: verified_receipt(session, rid, kind))
+
+
+def wait_for_deliveries(wallet, payouts, seconds=0):
+    """Poll only the receiving evidence; a transport failure never repeats payment operations."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            evidence = delivery_evidence(wallet, payouts)
+            if not evidence["missing"] or time.monotonic() >= deadline:
+                return evidence
+        except httpx.TransportError:
+            if time.monotonic() >= deadline:
+                raise
+        except httpx.HTTPStatusError as exc:
+            if (exc.response.status_code != 429 and exc.response.status_code < 500) or time.monotonic() >= deadline:
+                raise
+        time.sleep(min(3, max(0, deadline - time.monotonic())))
 
 
 def replay_evidence(evidence, wait_seconds):

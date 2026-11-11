@@ -9,6 +9,12 @@ The deployment Blueprint specifies two Docker services on the Singapore Starter 
 5. Use a private journal for the production operator session. Use the same `PRODUCTION_ADMIN_TOKEN` in the operator configuration. Run `.venv/bin/python scripts/seed_demo.py --api https://<api-host> --state logs/production-seed.json --catalog-only`. This uses a dedicated user workspace for public listings, publishes both maintainers' contexts and waits for a fresh hit ratio of at least 95% on each layer. Confirm both rows are hot through the production catalog. Keep journal files and workspace cookies private.
 6. For a code rollback, redeploy the last known-good commit to the same services. Keep the existing disk and review schema compatibility before a downgrade. Recheck health, workspace state, mode and webhook delivery after the deploy. [Deploy API](https://api-docs.render.com/reference/create-deploy)
 
+## Verify the active PayPal webhook receiver
+
+`make verify-full` creates sandbox operations and checks signed receiver records against each journal's exact event type and resource ID. A development subscription uses the local receiver's SQLite database. After moving the subscription, keep `PRODUCTION_PAYPAL_WEBHOOK_ID` equal to the active `PAYPAL_WEBHOOK_ID` in the operator's private environment. Bind `PRODUCTION_API_URL` to that receiver's HTTPS API origin and set `PRODUCTION_ADMIN_TOKEN` to its backend operator credential. The verifier queries the backend directly. A provider GET or a successful send from PayPal cannot establish receiver-side signature verification.
+
+To recheck an existing pair of journals without repeating payments, run `.venv/bin/python scripts/register_webhooks.py --check <wallet.json> <payout.json> --wait 180` with the corresponding receiver configuration. Keep pre-migration journals with their original receiver's evidence.
+
 ## Budget and storage settings
 
 Keep the API and its background settlement worker in one process on the persistent disk. Read the Blueprint and application defaults together when rotating an existing service. The API uses `CAPTURE_THRESHOLD_USD=2.00`, `FINAL_CAPTURE_MIN_USD=1.00`, `PAYOUT_MIN_USD=0.25` and `JUDGE_PAYOUT_MIN_USD=0.01`. A mandate can span tasks for up to `MANDATE_MAX_AGE_H=72` hours. `RUN_IDLE_END_MIN=10` ends an idle run and preserves the mandate for a subsequent task. Test the browser gateway and the backend against the same disk after redeployment. [Blueprint](../render.yaml) · [Sandbox policy and measured fees](pricing.md)

@@ -3,13 +3,12 @@
 import json
 import os
 from pathlib import Path
-import time
 import uuid
 
 import pytest
 
 from backend.app.paypal.client import ROOT, settings
-from backend.app.paypal.webhooks import delivery_evidence
+from backend.app.paypal.webhooks import wait_for_deliveries
 from scripts.sandbox_smoke import run
 
 
@@ -64,12 +63,7 @@ def test_reconcile_released_authorization_without_captures(wallet_and_payouts, t
 
 @pytest.mark.sandbox
 def test_verified_deliveries_for_actual_payments(wallet_and_payouts):
-    deadline = time.monotonic() + 180
-    while True:
-        evidence = delivery_evidence(*wallet_and_payouts)
-        if not evidence["missing"] or time.monotonic() >= deadline:
-            break
-        time.sleep(3)
+    evidence = wait_for_deliveries(*wallet_and_payouts, seconds=180)
     assert not evidence["missing"], evidence["missing"]
 
 

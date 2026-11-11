@@ -3,13 +3,12 @@
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.app.paypal.client import PayPalClient, PayPalConfigError, PayPalError, request_id, settings
-from backend.app.paypal.webhooks import EVENTS, delivery_evidence, replay_evidence
+from backend.app.paypal.webhooks import EVENTS, replay_evidence, wait_for_deliveries
 
 
 def ensure_registration(pp, url):
@@ -47,13 +46,9 @@ if __name__ == "__main__":
         raise SystemExit(0)
     if args.check:
         wallet, payout = (json.loads(p.read_text()) for p in args.check)
-        deadline = time.monotonic() + args.wait
-        while True:
-            evidence = delivery_evidence(wallet, payout)
-            if not evidence["missing"] or time.monotonic() >= deadline:
-                print(json.dumps(evidence, indent=2))
-                raise SystemExit(1 if evidence["missing"] else 0)
-            time.sleep(3)
+        evidence = wait_for_deliveries(wallet, payout, args.wait)
+        print(json.dumps(evidence, indent=2))
+        raise SystemExit(1 if evidence["missing"] else 0)
     public_api = settings().get("PUBLIC_API_URL")
     if not args.url and not public_api:
         parser.error("Configure PUBLIC_API_URL or pass --url for the public HTTPS webhook receiver.")
