@@ -92,8 +92,53 @@ def starlette_header_diagnostic(source):
     return ""
 
 
-def diagnostic(text, task):
-    """Compile only. This process never imports or executes model-generated source."""
+def rate_limit_window_diagnostic(source):
+    """Flag a simple append-before-429 pattern; this static heuristic is not exhaustive."""
+    for function in ast.walk(ast.parse(source)):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for index, statement in enumerate(function.body):
+            if not (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Attribute)
+                and statement.value.func.attr == "append"
+                and isinstance(statement.value.func.value, ast.Name)
+            ):
+                continue
+            name = statement.value.func.value.id
+            for guard in function.body[index + 1:]:
+                if not isinstance(guard, ast.If):
+                    continue
+                measures_list = any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == "len"
+                    and len(node.args) == 1 and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id == name
+                    for node in ast.walk(guard.test)
+                )
+                rejects = any(
+                    isinstance(node, ast.Return)
+                    and isinstance(node.value, ast.Call)
+                    and any(
+                        keyword.arg == "status_code"
+                        and isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value == 429
+                        for keyword in node.value.keywords
+                    )
+                    for branch in guard.body for node in ast.walk(branch)
+                )
+                if measures_list and rejects:
+                    return (
+                        f"Line {statement.lineno}: Append before quota rejection can count rejected requests in {name}. "
+                        "Prune expired accepted timestamps first; if two remain, return 429 without appending. "
+                        "Append the current time only after admission. Repeated rejections must not extend the window."
+                    )
+    return ""
+
+
+def diagnostic(text, task, *, prompt_version=9):
+    """Check syntax and static AST hints without importing or executing generated source."""
     blocks = FENCE.findall(text)
     if not blocks:
         return ""
@@ -136,6 +181,10 @@ def diagnostic(text, task):
                 hint = starlette_header_diagnostic(source)
                 if hint:
                     findings.append(hint)
+            if prompt_version >= 9 and task == TASKS["rate-limit"][1]:
+                hint = rate_limit_window_diagnostic(source)
+                if hint:
+                    findings.append(hint)
     return "\nPython syntax check of the preceding answer:\n" + "\n".join(findings)
 
 
@@ -163,14 +212,32 @@ def requests_module(task, step, *, builtin_task=True):
     return builtin_task and task in CONTRACTS and step in (5, 8, 9)
 
 
-def turn_question(task, step, instruction, *, previous="", http_feedback=None):
+def turn_question(task, step, instruction, *, previous="", http_feedback=None, prompt_version=9):
     contract = CONTRACTS.get(task, "")
-    if not contract and step == len(STEPS) - 1:
-        instruction = "Deliver the final artifact or complete explanation requested by the user's task."
+    if not contract:
+        if prompt_version >= 9 and step in (5, 8, 9):
+            instruction = {
+                5: "Propose the complete artifact or explanation requested by the user's task.",
+                8: "Review and correct the artifact against the user's requirements and requested response format.",
+                9: "Deliver the final artifact or complete explanation requested by the user's task.",
+            }[step]
+            instruction += (
+                " Respect the user's requested output format. Do not add Markdown fences "
+                "or explanatory prose unless the user requested them."
+            )
+        elif step == len(STEPS) - 1:
+            instruction = "Deliver the final artifact or complete explanation requested by the user's task."
     # Once the first implementation is in the dialogue, review and test planning
     # need just the observable behavior. Code generation keeps the full contract.
     if task == TASKS["rate-limit"][1] and step in (6, 7):
         contract = "Per client: 200, 200, 429. Return JSONResponse directly from middleware on rejection."
+    if prompt_version >= 9 and task == TASKS["rate-limit"][1]:
+        contract += (
+            " Count accepted requests only, never rejected attempts. First prune timestamps whose age is >= 60 seconds. "
+            "If two accepted timestamps remain, return 429 without appending or refreshing them. "
+            "Only an admitted request appends now. For one client, requests at monotonic seconds "
+            "0, 1, 30, 40, 62 must return 200, 200, 429, 429, 200."
+        )
     q = (
         f"Task: {task}\n"
         + (f"Application contract: {contract}\n" if contract else "")
@@ -179,7 +246,7 @@ def turn_question(task, step, instruction, *, previous="", http_feedback=None):
     )
     if step == 0:
         return q
-    q += diagnostic(previous, task)
+    q += diagnostic(previous, task, prompt_version=prompt_version)
     if http_feedback:
         q += (
             "\nIndependent sandbox HTTP check of the preceding proposal: "
@@ -199,7 +266,17 @@ def turn_question(task, step, instruction, *, previous="", http_feedback=None):
             "to update the outgoing http.response.start event with MutableHeaders(scope=message). "
             "Apply the correction to the module itself."
         )
-    if step == 9 and http_feedback:
+    if (
+        prompt_version >= 9
+        and task == TASKS["rate-limit"][1]
+        and http_feedback
+        and http_feedback.startswith("HTTP smoke failed.")
+    ):
+        q += (
+            "\nRepair the actual HTTP failure above. Prune first, reject while two accepted timestamps remain, "
+            "and append only after the request is admitted. A 429 response must not change the accepted-request window."
+        )
+    if step == 9 and http_feedback and (task in CONTRACTS or prompt_version <= 8):
         if http_feedback.startswith("HTTP smoke passed:"):
             q += "\nRepeat the preceding working module verbatim, including all its imports, in a single fenced python block."
         else:

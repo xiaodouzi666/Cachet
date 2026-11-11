@@ -16,6 +16,7 @@ IMAGE = "cachet-generated-app-check:v2"
 
 
 def run_http(task, answer, *, full=True, draft=False):
+    """Both modes check rejected-request recovery; full also waits a real 60 seconds."""
     source = app_code(answer, allow_prose=True)
     with TemporaryDirectory(prefix="cachet-public-code-") as temp:
         sandbox = Path(temp)

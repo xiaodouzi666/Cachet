@@ -12,8 +12,8 @@ from backend.app.config import ROOT, manifest, sources
 from backend.app.gateway.prompt_builder import END, SYSTEM, Prefix, dialogue, token_hash
 
 DIRECTORY = ROOT / "backend/app/replay/traces"
-SCHEMA = 8
-SUPPORTED_SCHEMAS = (6, 7, SCHEMA)
+SCHEMA = 9
+SUPPORTED_SCHEMAS = (6, 7, 8, SCHEMA)
 SCHEMA_6_FIRST_STEP = (
     "In two sentences, explain the chosen strategy using the two quoted costs in microdollars."
 )
@@ -80,7 +80,8 @@ def recorded_question(schema, task, step, *, quote=None, previous="", http_feedb
     legacy_first_turn = schema == 6 and step == 0
     instruction = SCHEMA_6_FIRST_STEP if legacy_first_turn else STEPS[step]
     question = turn_question(
-        task, step, instruction, previous=previous, http_feedback=http_feedback
+        task, step, instruction, previous=previous, http_feedback=http_feedback,
+        prompt_version=8 if schema <= 8 else 9,
     )
     if legacy_first_turn and quote is not None:
         return question + "\nQuote: " + json.dumps(quote, sort_keys=True)

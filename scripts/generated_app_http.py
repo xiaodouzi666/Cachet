@@ -14,6 +14,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.responses import PlainTextResponse
 
+import generated_app
 from generated_app import app
 
 
@@ -26,6 +27,42 @@ def get(port, address, path):
         connection.request("GET", path)
         response = connection.getresponse()
         return response.status, response.read(4096), response.getheader("X-Route-Class")
+
+
+def check_rejected_request_window(port):
+    """Exercise sliding-window recovery without changing Uvicorn's real clock."""
+    clock = [0.0]
+
+    class TimeProxy:
+        def __getattr__(self, name):
+            return (lambda: clock[0]) if name == "monotonic" else getattr(time, name)
+
+    bindings = {
+        name: value for name, value in vars(generated_app).items()
+        if value is time.monotonic or value is time
+    }
+    assert bindings, "Expected the application's imported monotonic clock"
+    try:
+        for name, value in bindings.items():
+            replacement = TimeProxy() if value is time else (lambda: clock[0])
+            setattr(generated_app, name, replacement)
+        observed = []
+        for instant in (0, 1, 30, 40, 62):
+            clock[0] = instant
+            # Separate from the clients in the real-time 60-second check.
+            code, body, _ = get(port, "127.0.0.3", "/ping")
+            observed.append(code)
+            if code == 200:
+                assert json.loads(body) == {"pong": True}
+        expected = [200, 200, 429, 429, 200]
+        assert observed == expected, (
+            "Rejected requests must not consume quota: at monotonic seconds "
+            f"[0, 1, 30, 40, 62], expected {expected}, observed {observed}. "
+            "Prune expired accepted timestamps, reject if two remain, and append only after admission."
+        )
+    finally:
+        for name, value in bindings.items():
+            setattr(generated_app, name, value)
 
 
 def check(task, full):
@@ -75,6 +112,7 @@ def check(task, full):
                     if code == 200
                 )
                 json.loads(observed[2][1])
+                check_rejected_request_window(port)
                 if not full:
                     return {"status_codes": codes, "distinct_clients": 2}
                 time.sleep(60.1)
