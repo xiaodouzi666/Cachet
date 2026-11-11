@@ -44,12 +44,14 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
   let transport: Awaited<ReturnType<typeof browserTransport>> | undefined;
   let through: BrowserContext | undefined;
   let active: string | undefined;
-  const diagnostic: Record<string, unknown> = {};
+  const history: {stage: string; at: string}[] = [];
+  const diagnostic: Record<string, unknown> = { history };
   let networkSnapshot: (() => unknown) | undefined;
   async function checkpoint(stage: string) {
     if (!process.env.CACHET_B2_EVIDENCE_DIR || !active) return;
     diagnostic.stage = stage;
     diagnostic.updated_at = new Date().toISOString();
+    history.push({stage, at: String(diagnostic.updated_at)});
     if (networkSnapshot) diagnostic.stream = networkSnapshot();
     await mkdir(process.env.CACHET_B2_EVIDENCE_DIR, {
       recursive: true,
@@ -85,7 +87,15 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
           sandbox_buyer_password: password,
         },
         async () => {},
-        { walletOnly: true, expectedWalletCapMicros: 1_000_000 },
+        {
+          walletOnly: true,
+          expectedWalletCapMicros: 1_000_000,
+          onOrder: async ({mandateId, orderId}: {mandateId: string; orderId: string}) => {
+            active = mandateId;
+            Object.assign(diagnostic, {workspace: person.workspace_id, mandate: mandateId, order: orderId});
+            await checkpoint("original_wallet_order_created");
+          },
+        },
       );
       person = await read(raw, "judge/state");
     }
@@ -93,6 +103,9 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
     expect(person.mandate.cap_micros).toBe(1_000_000);
     expect(person.mandate.status).toBe("ACTIVE");
     active = person.mandate.id;
+    Object.assign(diagnostic, {workspace:person.workspace_id, mandate:active, order:person.mandate.paypal_order_id,
+      authorization:person.mandate.authorization_id});
+    await checkpoint("original_wallet_active");
     const catalogPage = await direct.newPage();
     await catalogPage.goto("/catalog");
     await expect(catalogPage.getByLabel("Filter contexts")).toBeVisible();
@@ -161,6 +174,8 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
           hit_ratio: c.last_probe_hit_ratio,
         })),
     };
+    diagnostic.catalog = catalogProof;
+    await checkpoint("original_publications_visible");
     await catalogPage.close();
     const storage = await privateStorage(direct, persistence);
     transport = await browserTransport(new URL(baseURL));
@@ -204,6 +219,7 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
     await page.getByLabel("Coding task").selectOption("route-class");
     await page.getByRole("button", { name: "Get quote" }).click();
     await expect(page.locator(".quote-box .tag")).toHaveText("buy");
+    await checkpoint("request_original_run");
     await page.getByRole("button", { name: "Run agent", exact: true }).click();
     const visible = page.getByTestId("metered-turn");
     await expect(visible.first()).toBeVisible({ timeout: 120000 });
@@ -277,6 +293,7 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
     expect(end.workspace_id).toBe(before.workspace_id);
     expect(end.run.id).toBe(rid);
     expect(end.mandate.authorization_id).toBe(before.mandate.authorization_id);
+    await checkpoint("request_original_mandate_close");
     await page
       .getByRole("button", { name: "Close mandate", exact: true })
       .click();
@@ -288,6 +305,8 @@ test("retains one approved wallet mandate and resumes its live SSE run after a r
       )
       .toBe(true);
     const closed = (await read(raw, "judge/state")).mandate;
+    diagnostic.closed_status = closed.status;
+    await checkpoint("original_mandate_closed");
     const recon = await read(raw, "reconcile");
     expect(recon.ok).toBe(true);
     expect(recon.differences).toEqual([]);
