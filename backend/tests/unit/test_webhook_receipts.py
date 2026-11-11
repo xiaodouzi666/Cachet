@@ -104,3 +104,11 @@ def test_wait_for_receipts_retries_transient_reads_but_reports_denied_auth(monke
     monkeypatch.setattr(webhooks, "delivery_evidence", lambda *_: response.raise_for_status())
     with pytest.raises(httpx.HTTPStatusError):
         webhooks.wait_for_deliveries({}, {}, 180)
+
+
+
+def test_journal_cannot_collapse_two_claimed_orders_into_one_receipt():
+    wallet = {"completed": True, "readbacks": {name + ".order": {"id": "same-order"}
+                                              for name in ("multi", "partial", "unused")}}
+    with pytest.raises(ValueError, match="same PayPal resource"):
+        webhooks.expected_deliveries(wallet, {"completed": True, "readbacks": {}})

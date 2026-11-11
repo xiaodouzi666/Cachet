@@ -23,16 +23,23 @@ def expected_deliveries(wallet, payouts):
     if not wallet.get("completed") or not payouts.get("completed"):
         raise ValueError("Both sandbox smoke journals must be complete.")
     w, p = wallet["readbacks"], payouts["readbacks"]
+    def ids(journal, *operations):
+        distinct = {resource_id(journal[op]["id"]) for op in operations}
+        if len(distinct) != len(operations):
+            raise ValueError("Multiple smoke operations reference the same PayPal resource: " + ", ".join(operations))
+        return distinct
+
+    standard_voids = ("partial.void", "unused.void")
+    extra_voids = [key for key in w if key.endswith(".void") and key not in standard_voids]
     return {
-        "CHECKOUT.ORDER.APPROVED": {w[key + ".order"]["id"] for key in ("multi", "partial", "unused")},
-        "PAYMENT.AUTHORIZATION.CREATED": {w[key + ".authorization"]["id"] for key in ("multi", "partial", "unused")},
-        "PAYMENT.AUTHORIZATION.VOIDED": {w[key + ".void"]["id"] for key in ("partial", "unused")} |
-                                        {v["id"] for key, v in w.items() if key.endswith(".void")},
-        "PAYMENT.CAPTURE.COMPLETED": {w[key + ".capture"]["id"] for key in
-                                      ("multi.first", "multi.second", "multi.final", "partial.first")},
-        "PAYMENT.CAPTURE.REFUNDED": {w["multi.refund"]["id"]},
-        "PAYMENT.PAYOUTSBATCH.SUCCESS": {p["payout.batch"]["id"]},
-        "PAYMENT.PAYOUTS-ITEM.SUCCEEDED": {p[key]["id"] for key in ("payout.starlette", "payout.fastapi")},
+        "CHECKOUT.ORDER.APPROVED": ids(w, "multi.order", "partial.order", "unused.order"),
+        "PAYMENT.AUTHORIZATION.CREATED": ids(w, "multi.authorization", "partial.authorization", "unused.authorization"),
+        "PAYMENT.AUTHORIZATION.VOIDED": ids(w, *standard_voids, *extra_voids),
+        "PAYMENT.CAPTURE.COMPLETED": ids(w, "multi.first.capture", "multi.second.capture",
+                                        "multi.final.capture", "partial.first.capture"),
+        "PAYMENT.CAPTURE.REFUNDED": ids(w, "multi.refund"),
+        "PAYMENT.PAYOUTSBATCH.SUCCESS": ids(p, "payout.batch"),
+        "PAYMENT.PAYOUTS-ITEM.SUCCEEDED": ids(p, "payout.starlette", "payout.fastapi"),
     }
 
 
