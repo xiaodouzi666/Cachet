@@ -18,6 +18,14 @@ async function question(page: Page, text: string, tool: string) {
   expect(body).toContain("event: done");
   expect(body).toContain(tool);
   expect(body).not.toContain("event: error");
+  const outDir = process.env.CACHET_COPILOT_EVIDENCE_DIR;
+  if (outDir) {
+    mkdirSync(outDir, { recursive: true, mode: 0o700 });
+    // Record content the Studio received, without request headers, cookies or signed events.
+    const records = body.replace(/\r\n/g, "\n").split("\n\n").filter(Boolean)
+      .map(block => block.split("\n").filter(line => line.startsWith("event: ") || line.startsWith("data: ")).join("\n"));
+    writeFileSync(join(outDir, tool + "-stream.json"), JSON.stringify({ text, records }, null, 2) + "\n", { mode: 0o600 });
+  }
   return body;
 }
 
@@ -106,7 +114,21 @@ test("answers the judge's three questions through the Studio agent and confirms 
   await captureEvidence("refund-proposal");
   writeFileSync(journalPath + ".tmp", JSON.stringify({ workspace: journal.workspace_id, mandate, call: selected }), { mode: 0o600 });
   renameSync(journalPath + ".tmp", journalPath);
+  const confirmation = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/copilot/confirm" && response.request().method() === "POST",
+    { timeout: 120_000 },
+  );
   await page.getByRole("button", { name: "Confirm sandbox refund" }).click();
+  const firstResponse = await confirmation;
+  expect(firstResponse.ok()).toBe(true);
+  const confirmed = await firstResponse.json();
+  expect(confirmed.call_id).toBe(selected);
+  if (evidenceDir) {
+    const evidenceFile = join(evidenceDir, "first-confirmation.json");
+    if (!existsSync(evidenceFile)) {
+      writeFileSync(evidenceFile, JSON.stringify(confirmed, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    }
+  }
   await expect(page.getByRole("heading", { name: "Confirm refund" })).toHaveCount(0, { timeout: 120_000 });
   const after = await read("refunds");
   const priorIds = new Set(before.map((r: { paypal_refund_id: string }) => r.paypal_refund_id));
