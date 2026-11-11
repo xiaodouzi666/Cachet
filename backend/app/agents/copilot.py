@@ -108,6 +108,9 @@ def route(question, definitions):
     mandate = re.fullmatch(r"where did the money from mandate " + identifier + r" go[?]?", question, re.I)
     if mandate:
         return "mandate_breakdown", {"mandate_id": mandate.group(1)}
+    declined = re.fullmatch(r"(?:please )?(?:do not|don't|never) refund call " + identifier + r"[.!]?", question, re.I)
+    if declined:
+        return "call_details", {"call_id": declined.group(1)}
     refund = re.fullmatch(r"(?:please )?refund call " + identifier + r"[.!]?", question, re.I)
     if refund:
         return "propose_refund", {"call_id": refund.group(1)}
