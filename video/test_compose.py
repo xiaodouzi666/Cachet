@@ -8,11 +8,24 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from compose_take import encode
+from compose_take import encode, register_frame
 from package import inspect_take, verify_pair
 
 
 class EditedMilestones(unittest.TestCase):
+    def test_joined_observation_registers_its_real_frame_after_a_clock_shift(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            stream = root / "source.webm"
+            figure = root / "observed.png"
+            encode([
+                "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=6",
+                "-c:v", "libvpx", "-deadline", "realtime", "-threads", "2", stream,
+            ])
+            encode(["-ss", "4.40", "-i", stream, "-frames:v", "1", figure])
+            frame = register_frame(stream, 1900, figure, 150, earliest=80, joined=True)
+            self.assertLessEqual(abs(frame - 110), 1)
+
     def test_long_wait_popup_camera_action_and_tamper(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

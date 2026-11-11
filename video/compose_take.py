@@ -134,12 +134,16 @@ def shot(raw, at_ms, path):
         raise ValueError("No camera frame at the marked time")
 
 
-def register_frame(source, stamp, still, frames):
+def register_frame(source, stamp, still, frames, *, earliest=0, joined=False):
     """Locate the original browser screenshot on the camera's media clock."""
     predicted = min(frames - 1, max(0, round(stamp * FPS / 1000)))
-    begin = max(0, predicted - FPS)
-    end = min(frames, predicted + FPS + 1)
-    filter_ = "scale=96:54,format=gray"
+    # A new browser observation has its own media clock. The actual handoff between
+    # Chromium instances can put the matching frame several seconds from its wall time.
+    span = 4 * FPS if joined else FPS
+    begin = max(earliest, predicted - span, 0)
+    end = min(frames, max(begin + 1, predicted + span + 1))
+    width, height = (320, 180) if joined else (96, 54)
+    filter_ = f"scale={width}:{height},format=gray"
     setup = [
         "ffmpeg",
         "-nostdin",
@@ -180,7 +184,7 @@ def register_frame(source, stamp, still, frames):
             "-",
         ]
     )
-    size = 96 * 54
+    size = width * height
     if len(target) != size or len(raw) < size:
         raise ValueError(
             "Cannot align a marked browser screenshot with the original video"
@@ -288,6 +292,7 @@ def compose(raw, dest, manifest, scene, tmp, crf, kinds):
         frames = max(1, round(duration * FPS))
         points = []
         previous_ms = -1
+        previous_photograph = -1
         for event in entry["events"]:
             name = event["label"]
             if (
@@ -304,7 +309,11 @@ def compose(raw, dest, manifest, scene, tmp, crf, kinds):
                 raise ValueError(f"Unverifiable source mark {name}")
             frame = min(frames - 1, max(0, round(event["ms"] * FPS / 1000)))
             if still.exists() and not popup:
-                frame = register_frame(source, event["ms"], still, frames)
+                frame = register_frame(
+                    source, event["ms"], still, frames,
+                    earliest=max(0, previous_photograph), joined=bool(event.get("fragment")),
+                )
+                previous_photograph = frame
             points.append((event, frame, still, popup))
         # Browser monotonic time starts just before this page's actual screencast.
         # Anchor unscreenshoted request markers to the closest photographed DOM event.
