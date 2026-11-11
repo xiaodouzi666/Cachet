@@ -104,7 +104,9 @@ function actionEvent(cams,label,key){
   for(const cam of cams){
     const event={label,ms:Math.round(t-cam.start),utc,actionKey:key};
     cam.events.push(event);
-    require("node:fs").appendFileSync(path.join(cam.dir,cam.scene+"-soak-action-events.jsonl"),JSON.stringify(event)+"\n",{mode:0o600,flush:true});
+    const sync=require("node:fs");
+    const fd=sync.openSync(path.join(cam.dir,cam.scene+"-soak-action-events.jsonl"),"a",0o600);
+    try{sync.writeFileSync(fd,JSON.stringify(event)+"\n");sync.fsyncSync(fd);}finally{sync.closeSync(fd);}
   }
 }
 function checkDisplayedMoney(text, micros){

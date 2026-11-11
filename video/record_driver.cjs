@@ -35,6 +35,11 @@ async function fileLock(file,work,nonblocking=false) {
     return await work();
   } finally { child.stdin.end(); await done; }
 }
+function gpuLockPath() {
+  if(process.env.CACHET_GPU_LOCK)return process.env.CACHET_GPU_LOCK;
+  const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
+  return path.join(path.dirname(common),".cache/night-gpu.lock");
+}
 function options(args) {
   const value = flag => {
     const n=args.indexOf(flag);
@@ -258,9 +263,7 @@ async function runRecorder(api,args) {
           const usesGpu=ordered.some(n=>changing.has(n)&&c.data.segments[n+"-regular"]?.status!=="captured");
           let failed;
           if(usesGpu){
-            const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
-            const lock=process.env.CACHET_GPU_LOCK||path.join(path.dirname(common),".cache/night-gpu.lock");
-            failed=await fileLock(lock,async()=>{
+            failed=await fileLock(gpuLockPath(),async()=>{
               try { return await runCamera(); }
               finally { await waitForSponsor(c,browser,api); }
             });
@@ -281,9 +284,10 @@ async function runRecorder(api,args) {
               let savedPair=await read(pairFile,null);
               if(!savedPair){
                 const sourceDir=scene+"-attempt-"+randomUUID();
-                const pair=await recordSoakSegment({scene,browser,baseURL:meta.origin,journalPath:opts.actions?
+                const recordSoak=()=>recordSoakSegment({scene,browser,baseURL:meta.origin,journalPath:opts.actions?
                 process.env.CACHET_SOAK_REHEARSAL_JOURNAL:process.env.CACHET_SOAK_JOURNAL,
                 outputDirs:cameras.map(c=>path.join(c.dir,sourceDir)),rehearsal:opts.rehearsal,rehearsalActions:opts.actions});
+                const pair=scene==="S7"?await fileLock(gpuLockPath(),recordSoak):await recordSoak();
                 savedPair={sourceDir,pair};
                 await atomic(pairFile,savedPair);
               }

@@ -306,6 +306,26 @@ def compose(raw, dest, manifest, scene, tmp, crf):
             if still.exists() and not popup:
                 frame = register_frame(source, event["ms"], still, frames)
             points.append((event, frame, still, popup))
+        # Browser monotonic time starts just before this page's actual screencast.
+        # Anchor unscreenshoted request markers to the closest photographed DOM event.
+        # Keep the original UTC and raw_ms for correlating the same request on both cameras.
+        anchors = [
+            (event["ms"], frame - round(event["ms"] * FPS / 1000))
+            for event, frame, still, popup in points
+            if still.exists() and not popup
+        ]
+        if anchors:
+            corrected = []
+            for event, frame, still, popup in points:
+                if popup or not still.exists():
+                    offset = min(
+                        anchors, key=lambda anchor: abs(anchor[0] - event["ms"])
+                    )[1]
+                    frame = max(
+                        0, min(frames - 1, round(event["ms"] * FPS / 1000) + offset)
+                    )
+                corrected.append((event, frame, still, popup))
+            points = corrected
         all_frames = [(0, frames)]
         if source_scene == "S5" and source_kind == "regular":
             decision = next(
