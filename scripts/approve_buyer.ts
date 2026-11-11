@@ -103,7 +103,7 @@ async function main() {
   }
 }
 
-async function approveSandboxPopup(page, {email, password, returnUrl, orderId, expectedUsd}) {
+async function approveSandboxPopup(page, {email, password, returnUrl, orderId, expectedUsd, beforeApproval}) {
   if (!email || !password) throw new CheckoutError("Provide the dedicated sandbox buyer credentials.");
   const receipt = returnUrl ? new URL(returnUrl) : null;
   page.setDefaultTimeout(6000);
@@ -165,6 +165,11 @@ async function approveSandboxPopup(page, {email, password, returnUrl, orderId, e
             if (phase === "pay") {
               button = await plainPay(frame, new URL(page.url()), new URL(frame.url()), orderId, expectedUsd);
               if (!button || !(await button.isEnabled())) throw new CheckoutError("The sandbox order or displayed amount changed.");
+            }
+            if (beforeApproval && sameOrder(new URL(page.url()), orderId) &&
+                (phase === "pay" || (phase === "approval" &&
+                  /^(agree (&|and) (continue|pay)|pay now|complete purchase|authorize)$/i.test((await button.innerText()).trim())))) {
+              await beforeApproval(frame, button, phase);
             }
             console.log(`Sandbox browser attempting: ${phase}.`);
             try {

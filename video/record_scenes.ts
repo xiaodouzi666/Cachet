@@ -68,77 +68,79 @@ async function publishLayers(
     }
   }
 }
-async function approve(
-  page,
-  state,
-  mark = quietMark,
-  { walletOnly = false, waitForEvidence = (_, run) => run() } = {},
-) {
-  if (!walletOnly && state.card_enabled) {
-    await page.getByRole("button", { name: "Use sandbox test card" }).click();
-  } else {
-    if (
-      !state.next_public_paypal_client_id ||
-      !state.sandbox_buyer_email ||
-      !state.sandbox_buyer_password
-    )
-      throw Error(
-        "Configure the PayPal sandbox application and sandbox buyer to exercise wallet approval.",
-      );
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup", { timeout: 45000 }),
-      page.getByLabel("Approve with PayPal sandbox").click(),
-    ]);
-    try {
-      if (walletOnly) {
-        await popup.waitForURL(
-          (url) =>
-            url.protocol === "https:" &&
-            ["sandbox.paypal.com", "www.sandbox.paypal.com"].includes(
-              url.hostname,
-            ),
-        );
-        await popup.waitForLoadState("domcontentloaded");
-        await expect.poll(async () => popup.locator("body").innerText(), {
-          timeout:45000, message:"Waiting for the real sandbox checkout to render before redaction",
-        }).toMatch(/PayPal|Log in|Continue|Approve|支付|登录/i);
-        // Capture the untouched sandbox approval surface. All input and embedded frames are masked.
-        await mark("sandbox-wallet-open", popup, [
-          popup.locator("input, iframe"),
-          popup.getByText(state.sandbox_buyer_email, { exact: false }),
-        ]);
-      }
-      let mandate;
-      await expect.poll(async () => {
-        mandate = (await readState(page)).mandate;
-        return Boolean(
-          mandate?.payment_method === "wallet" &&
-          ["CREATED", "APPROVED"].includes(mandate.status) &&
-          mandate.paypal_order_id &&
-          Number.isSafeInteger(mandate.cap_micros) &&
-          mandate.cap_micros > 0 && mandate.cap_micros % 10000 === 0,
-        );
-      }, { timeout: 30000, message: "Waiting for the workspace wallet order and its verified USD budget" }).toBe(true);
-      if (walletOnly) expect(mandate.cap_micros).toBe(5_000_000);
-      await waitForEvidence("separate-sandbox-approval-window", () => approveSandboxPopup(popup, {
-        orderId: mandate.paypal_order_id,
-        expectedUsd: (mandate.cap_micros / 1e6).toFixed(2),
-        email: state.sandbox_buyer_email,
-        password: state.sandbox_buyer_password,
-        returnUrl: new URL(page.url()).origin,
-      }));
-    } finally {
-      if (!popup.isClosed()) await popup.close();
-      await popup.video()?.delete();
+function originalActiveWallet(m, order) {
+  return Boolean(m && order && m.id===order.id && m.paypal_order_id===order.paypal_order_id &&
+    m.payment_method==="wallet" && m.cap_micros===order.cap_micros && m.status==="ACTIVE" && m.authorization_id);
+}
+
+async function markSandboxApproval(popup,frame,button,mark,amount) {
+  // Show only genuine PayPal controls, its own brand, and an exact order amount.
+  // All other page elements are concealed in the screenshot across every iframe.
+  await frame.evaluate(usd=>{
+    for(const node of document.querySelectorAll("img,button,span,p,strong,b,div")){
+      const logo=node.tagName==="IMG" && /^paypal(?: logo)?$/i.test(node.getAttribute("alt")||"");
+      const text=(node.textContent||"").trim();
+      if(logo || (!node.children.length && ["PayPal","USD "+usd,"$"+usd,"US$"+usd,usd+" USD"].includes(text)))
+        node.setAttribute("data-cachet-film-visible","");
     }
+  },amount);
+  await button.evaluate(node=>node.setAttribute("data-cachet-film-visible",""));
+  let nested=frame;
+  while(nested.parentFrame()){
+    const el=await nested.frameElement();
+    await el.evaluate(node=>node.setAttribute("data-cachet-film-frame",""));
+    nested=nested.parentFrame();
   }
-  await expect
-    .poll(
-      async () => Boolean((await readState(page)).mandate?.authorization_id),
-      { timeout: 75000 },
-    )
-    .toBe(true);
+  await mark("sandbox-wallet-open",popup,[],"verified-provider-control");
+}
+
+async function approve(page,state,mark=quietMark,
+                       {walletOnly=false,waitForEvidence=(_,fn)=>fn(),onOrder=async()=>{}}={}) {
+  if(!walletOnly && state.card_enabled){
+    await page.getByRole("button",{name:"Use sandbox test card"}).click();
+    await expect.poll(async()=>Boolean((await readState(page)).mandate?.authorization_id),{timeout:75000}).toBe(true);
+    await mark("sandbox-authorized");
+    return;
+  }
+  if(!state.next_public_paypal_client_id || !state.sandbox_buyer_email || !state.sandbox_buyer_password)
+    throw Error("Configure the PayPal sandbox buyer and application for the wallet scene.");
+  const [popup]=await Promise.all([page.waitForEvent("popup",{timeout:45000}),page.getByLabel("Approve with PayPal sandbox").click()]);
+  let order,filmed=false,transportError=null;
+  try {
+    await popup.waitForURL(url=>url.protocol==="https:" && ["sandbox.paypal.com","www.sandbox.paypal.com"].includes(url.hostname));
+    await expect.poll(async()=>{
+      order=(await readState(page)).mandate;
+      return Boolean(order?.payment_method==="wallet" && ["CREATED","APPROVED"].includes(order.status) &&
+        order.paypal_order_id && Number.isSafeInteger(order.cap_micros) && order.cap_micros>0 && order.cap_micros%10000===0);
+    },{timeout:30000,message:"Waiting for this workspace's sandbox order"}).toBe(true);
+    if(walletOnly)expect(order.cap_micros).toBe(5000000);
+    await onOrder({mandateId:order.id,orderId:order.paypal_order_id});
+    const amount=(order.cap_micros/1e6).toFixed(2);
+    try{
+      await waitForEvidence("separate-sandbox-approval-window",()=>approveSandboxPopup(popup,{
+        orderId:order.paypal_order_id,expectedUsd:amount,email:state.sandbox_buyer_email,
+        password:state.sandbox_buyer_password,returnUrl:new URL(page.url()).origin,
+        beforeApproval:walletOnly ? async(frame,button)=>{
+          if(!filmed){await markSandboxApproval(popup,frame,button,mark,amount);filmed=true;}
+        }:undefined,
+      }));
+    }catch(e){
+      // A provider navigation can race SDK.onApprove after PayPal accepted the order.
+      // Allow only the same, already-authorized workspace order to resolve that race.
+      transportError=["CheckoutError","TimeoutError"].includes(e.name)?e.name:"checkout-transport";
+    }
+  }finally{
+    if(!popup.isClosed()) await popup.close().catch(()=>{});
+    // The external login video is never a source clip. Closing the recording context
+    // also erases the private scratch directory if the SDK closed the popup first.
+    await popup.video()?.delete().catch(()=>{});
+  }
+  await expect.poll(async()=>originalActiveWallet((await readState(page)).mandate,order),{
+    timeout:75000,message:"The original wallet order has no matching active sandbox authorization"+(transportError?" ("+transportError+")":""),
+  }).toBe(true);
   await mark("sandbox-authorized");
+  return {verifiedProviderControlFilmed:filmed,returnStatus:transportError?"authorization-readback-after-popup-race":"authorization-readback",
+          diagnostic:transportError};
 }
 function recordingContext(contexts, { replay=false, flushedContextId } = {}) {
   return contexts.find(c => c.can_manage && c.slug === "fastapi" &&
@@ -334,13 +336,14 @@ const scenes = {
     expect(state.kind).toBe("judge");
     expect(state.mandate).toBeFalsy();
     await page.getByLabel("Budget (USD)", {exact:true}).fill("5.00");
-    await approve(page, state, mark, { walletOnly: true, waitForEvidence });
+    const approval=await approve(page,state,mark,{walletOnly:true,waitForEvidence,onOrder:checkpoint});
+    expect(approval.verifiedProviderControlFilmed,"Film the original approval control before continuing the regular wallet take").toBe(true);
     const mandate = (await readState(page)).mandate;
     expect(mandate.cap_micros).toBe(5000000);
     expect(mandate.payment_method).toBe("wallet");
     await checkpoint({mandateId:mandate.id, orderId:mandate.paypal_order_id, authorizationId:mandate.authorization_id});
     const measured = await quote(page, mark);
-    return { quote:measured, mandateId: mandate.id, orderId: mandate.paypal_order_id, authorizationId: mandate.authorization_id };
+    return { quote:measured, approval, mandateId: mandate.id, orderId: mandate.paypal_order_id, authorizationId: mandate.authorization_id };
   },
   async S5({ page, go, mark, s3, s4, waitForEvidence }) {
     await go("/judge");
@@ -479,7 +482,7 @@ async function main() {
   return runRecorder({scenes, chromium, expect, readState, readJson}, process.argv.slice(2));
 }
 module.exports = { scenes, main, readState, publishLayers, approve, quote, completedTurns,
-  isColdAndFree, isFaultedWarmBreach, recordingContext, observeLiveBuy, verifyLiveBuy };
+  isColdAndFree, isFaultedWarmBreach, recordingContext, observeLiveBuy, verifyLiveBuy, originalActiveWallet, markSandboxApproval };
 if (require.main === module) main().catch(error => {
   console.error(String(error.message).split("Call log:")[0]);
   process.exitCode = 1;

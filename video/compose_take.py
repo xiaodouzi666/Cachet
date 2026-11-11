@@ -249,7 +249,7 @@ def join_motion(source, ranges, parts, options, tmp):
     return count
 
 
-def compose(raw, dest, manifest, scene, tmp, crf):
+def compose(raw, dest, manifest, scene, tmp, crf, kinds):
     options = [
         "-an",
         "-c:v",
@@ -275,7 +275,7 @@ def compose(raw, dest, manifest, scene, tmp, crf):
     marks = []
     sources = {}
     output_frame = 0
-    for kind in sources_for(scene):
+    for kind in kinds:
         source_scene = "S5" if kind == "decision" else scene
         source_kind = "regular" if kind == "decision" else kind
         entry = manifest["segments"][source_scene + "-" + source_kind]
@@ -310,16 +310,17 @@ def compose(raw, dest, manifest, scene, tmp, crf):
         # Anchor unscreenshoted request markers to the closest photographed DOM event.
         # Keep the original UTC and raw_ms for correlating the same request on both cameras.
         anchors = [
-            (event["ms"], frame - round(event["ms"] * FPS / 1000))
+            (event["ms"], frame - round(event["ms"] * FPS / 1000), event.get("fragment"))
             for event, frame, still, popup in points
             if still.exists() and not popup
         ]
         if anchors:
             corrected = []
             for event, frame, still, popup in points:
-                if popup or not still.exists():
+                matching = [a for a in anchors if a[2] == event.get("fragment")]
+                if matching and (popup or not still.exists()):
                     offset = min(
-                        anchors, key=lambda anchor: abs(anchor[0] - event["ms"])
+                        matching, key=lambda anchor: abs(anchor[0] - event["ms"])
                     )[1]
                     frame = max(
                         0, min(frames - 1, round(event["ms"] * FPS / 1000) + offset)
@@ -450,7 +451,7 @@ def compose(raw, dest, manifest, scene, tmp, crf):
             }
             if still.exists():
                 mark["source_screenshot_sha256"] = sha(still)
-            for field in ("utc", "actionKey"):
+            for field in ("utc", "actionKey", "fragment", "fragment_ms", "surface"):
                 if field in event:
                     mark[field] = event[field]
             marks.append(mark)
@@ -492,9 +493,9 @@ def compose(raw, dest, manifest, scene, tmp, crf):
     }
 
 
-def input_digest(raw, manifest, scene, crf):
+def input_digest(raw, manifest, scene, crf, kinds):
     inputs = [sha(Path(__file__)), crf]
-    for kind in sources_for(scene):
+    for kind in kinds:
         target = "S5" if kind == "decision" else scene
         component = "regular" if kind == "decision" else kind
         entry = manifest["segments"][target + "-" + component]
@@ -551,22 +552,34 @@ def main():
     for scene in args.scenes.split(","):
         if scene not in SCENES:
             parser.error("Unknown scene")
-        if not all(
-            manifest["segments"]
-            .get("S5-regular" if k == "decision" else f"{scene}-{k}", {})
+        expected = sources_for(scene)
+        present = [
+            kind
+            for kind in expected
+            if manifest["segments"]
+            .get("S5-regular" if kind == "decision" else f"{scene}-{kind}", {})
             .get("status")
             == "captured"
-            for k in sources_for(scene)
-        ):
-            result["scenes"][scene] = {"status": "incomplete", "events": []}
+        ]
+        if not present:
+            result["scenes"][scene] = {
+                "status": "incomplete",
+                "missing_sources": expected,
+                "events": [],
+            }
             continue
-        signature = input_digest(raw, manifest, scene, args.crf)
+        signature = input_digest(raw, manifest, scene, args.crf, present)
         previous = result["scenes"].get(scene, {})
         if previous.get("input_digest") == signature and intact(dest, scene, previous):
             continue
         with TemporaryDirectory(dir=dest) as d:
             result["scenes"][scene] = compose(
-                raw, dest, manifest, scene, Path(d), args.crf
+                raw, dest, manifest, scene, Path(d), args.crf, present
+            )
+        if present != expected:
+            result["scenes"][scene].update(
+                status="partial",
+                missing_sources=[k for k in expected if k not in present],
             )
         result["scenes"][scene]["input_digest"] = signature
     tmp = dest / "timeline.json.tmp"

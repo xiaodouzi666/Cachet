@@ -37,3 +37,6 @@ The original source videos, stills, timestamps, cookie state, camera manifests a
 For an explicitly incomplete handoff, use `--allow-partial` while recording and `--partial` while packaging. Recording errors still return a failure exit status. The top-level timeline lists missing scenes by camera and any failed pair validation. A complete D1/D2 handoff requires the fully validated package. Copy **only the verified handoff directory** to the editing Mac at `~/Documents/Codex/video_raw_1112/`.
 
 The optional first-cut editor accepts `python video/edit.py TAKE --output video/out/cachet.mp4`; use `--preview` for a rehearsal.
+
+
+An interrupted original soak payout can be resumed with the same recording session and journal. Run the recorder with `S7 --soak-only` and the original environment flags. The cameras record the existing batch and both provider item readbacks. The editor joins the original browser submission with the later observation only when both camera journals match the original request and UTC, and retains their source hashes in the timeline. A local C7 rehearsal can be exported with `--rehearsal --partial` once one complete ordinary take and the shared original S5/S6/S7 views have been verified. The package records which camera completed all eight scenes.
