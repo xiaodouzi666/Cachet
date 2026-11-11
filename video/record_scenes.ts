@@ -179,46 +179,49 @@ async function completedTurns(page, mark = quietMark, runId) {
     .toBe("completed");
   await mark("ten-metered-turns");
 }
-// The SSE endpoint replays the run's persisted events before streaming new ones.
-// Return the first admission tagged by this flush, or all turns after completion.
-async function readRunTurns(page, runId, flushId = null) {
-  return page.evaluate(
-    ({ runId, flushId }) =>
-      new Promise((resolve, reject) => {
-        const source = new EventSource(
-          "/api/agent/runs/" + encodeURIComponent(runId) + "/events",
-        );
-        const turns = new Map();
-        const timer = setTimeout(
-          () => finish("Timed out waiting for live run evidence."),
-          180000,
-        );
-        function finish(error) {
-          clearTimeout(timer);
-          source.close();
-          if (error) reject(new Error(error));
-          else resolve([...turns.values()]);
-        }
-        source.addEventListener("turn", (event) => {
-          const turn = JSON.parse(event.data);
-          if (flushId && turn.cache_flush_id !== flushId) return;
-          turns.set(turn.id, turn);
-          if (flushId) finish();
-        });
-        source.addEventListener("done", () =>
-          finish(
-            flushId && "Run finished without a turn admitted after this flush.",
-          ),
-        );
-        source.addEventListener("error", (event) => {
-          if ("data" in event || source.readyState === EventSource.CLOSED)
-            finish(
-              "The run failed or its event stream closed before completion.",
-            );
-        });
-      }),
-    { runId, flushId },
-  );
+// For terminal runs the original SSE endpoint replays its complete durable event
+// history and closes. This read does not re-run inference or duplicate an active SSE feed.
+async function savedEvents(page,runId) {
+  const state=await readState(page);
+  expect(state.run?.id).toBe(runId);
+  expect(state.run?.status).toBe("completed");
+  const result=await page.request.get("/api/agent/runs/"+encodeURIComponent(runId)+"/events",{timeout:30000});
+  expect(result.ok()).toBe(true);
+  const packets=(await result.text()).split(/\r?\n\r?\n/).map(frame=>{
+    const kind=frame.match(/^event: ?(.+)$/m), data=frame.match(/^data: ?(.+)$/m);
+    return kind && data ? {kind:kind[1].trim(),data:JSON.parse(data[1])} : null;
+  }).filter(Boolean);
+  expect(packets.some(e=>e.kind==="done" && e.data.run_id===runId && e.data.status==="completed")).toBe(true);
+  return packets;
+}
+
+async function readRunTurns(page,runId){
+  return (await savedEvents(page,runId)).filter(e=>e.kind==="turn").map(e=>e.data);
+}
+
+// The machine decision is the enum "buy"; the actual model wording can be "shared prefix".
+async function observeLiveBuy(page,runId) {
+  const state=await readState(page);
+  expect(state.run?.id).toBe(runId);
+  expect(state.run?.mode).toBe("live");
+  expect(state.run?.quote_json?.decision).toBe("buy");
+  const decision=page.locator("ul.events > li").filter({has:page.locator("b",{hasText:/^decision$/})});
+  await expect(decision).toContainText("Live model explanation",{timeout:120000});
+  const reason=await decision.locator("span").evaluate(span=>[...span.childNodes]
+    .filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join("").trim());
+  expect(reason.length).toBeGreaterThan(0);
+  return {decision,reason};
+}
+
+async function verifyLiveBuy(page,runId,displayed) {
+  const records=(await savedEvents(page,runId)).filter(e=>e.kind==="decision");
+  expect(records).toHaveLength(1);
+  const receipt=records[0].data;
+  expect(receipt.decision).toBe("buy");
+  expect(receipt.source).toBe("live");
+  expect(receipt.reason).toBe(displayed);
+  expect(require("node:crypto").createHash("sha256").update(displayed).digest("hex")).toBe(receipt.answer_sha256);
+  return receipt;
 }
 
 function isColdAndFree(turn, flushId) {
@@ -359,9 +362,7 @@ const scenes = {
     const {run_id: runId} = await started.json();
     expect(runId).toBeTruthy();
     await go("/agent");
-    const decision = page.locator("ul.events > li").filter({has:page.locator("b",{hasText:/^decision$/})});
-    await expect(decision).toContainText("Live model explanation", {timeout:120000});
-    await expect(decision.locator("span")).toContainText(/buy/i);
+    const {decision,reason}=await observeLiveBuy(page,runId);
     await decision.scrollIntoViewIfNeeded();
     await mark("live-buy-decision");
     const rows = page.getByTestId("agent-run").getByTestId("metered-turn");
@@ -372,12 +373,14 @@ const scenes = {
     await rows.nth(3).scrollIntoViewIfNeeded();
     await mark("live-call-metering");
     await completedTurns(page, mark, runId);
-    const turns = await readRunTurns(page, runId);
+    const receipt=await verifyLiveBuy(page,runId,reason);
+    const turns=await readRunTurns(page,runId);
     expect(turns).toHaveLength(10);
     expect(turns.every(t => t.mode === "live" && t.prompt_tokens > 0 && t.charge_micros > 0)).toBe(true);
     expect(turns.some(t => t.public_charge_micros > 0)).toBe(true);
     return {workspaceId: state.workspace_id, mandateId: state.mandate.id, runId,
-      calls: turns.map(t => t.id)};
+      calls: turns.map(t => t.id), decision:{source:receipt.source, decision:receipt.decision,
+        reason:receipt.reason, answer_sha256:receipt.answer_sha256}};
   },
   async S6({ page, go, mark, s3, s5, waitForEvidence }) {
     await go("/judge");
@@ -420,14 +423,16 @@ const scenes = {
     ]);
     expect(started.ok()).toBe(true);
     const {run_id:coldRun}=await started.json();
-    const [cold]=await readRunTurns(page,coldRun,flushId);
-    expect(isColdAndFree(cold,flushId)).toBe(true);
-    expect(cold.id).toMatch(/^[a-zA-Z0-9_-]+$/);
-    const coldRow=page.locator('[data-testid="metered-turn"][data-call-id="'+cold.id+'"]');
-    await expect(coldRow).toContainText("Cold · free public prefix");
+    const coldFeed=page.getByTestId("agent-run");
+    await expect(coldFeed).toHaveAttribute("data-run-id",coldRun);
+    const coldRow=coldFeed.getByTestId("metered-turn").filter({has:page.getByText("Cold · free public prefix",{exact:true})}).first();
+    await expect(coldRow).toBeVisible({timeout:150000});
+    const shownCall=await coldRow.getAttribute("data-call-id");
     await coldRow.scrollIntoViewIfNeeded();
     await mark("cold-free-public-prefix");
-    await completedTurns(page, quietMark, coldRun);
+    await completedTurns(page,quietMark,coldRun);
+    const cold=(await readRunTurns(page,coldRun)).find(t=>t.id===shownCall);
+    expect(cold && isColdAndFree(cold,flushId)).toBe(true);
     await go("/judge");
     await step(5).click();
     const postTo = route => response => response.request().method()==="POST" && new URL(response.url()).pathname===route;
@@ -474,7 +479,7 @@ async function main() {
   return runRecorder({scenes, chromium, expect, readState, readJson}, process.argv.slice(2));
 }
 module.exports = { scenes, main, readState, publishLayers, approve, quote, completedTurns,
-  isColdAndFree, isFaultedWarmBreach, recordingContext };
+  isColdAndFree, isFaultedWarmBreach, recordingContext, observeLiveBuy, verifyLiveBuy };
 if (require.main === module) main().catch(error => {
   console.error(String(error.message).split("Call log:")[0]);
   process.exitCode = 1;

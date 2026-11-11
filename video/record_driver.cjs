@@ -42,12 +42,14 @@ function options(args) {
     assert(args[n+1] && !args[n+1].startsWith("--"),"Missing "+flag+" value");
     return args[n+1];
   };
-  const opts=new Set(["--session","--rehearsal","--isolated-rehearsal-actions","--archive-gallery","--compose-only","--cleanup","--allow-partial"]);
+  const opts=new Set(["--regular-take","--session","--rehearsal","--isolated-rehearsal-actions","--archive-gallery","--compose-only","--cleanup","--allow-partial"]);
   assert(args.filter(x=>x.startsWith("--")).every(x=>opts.has(x)),"Unknown recorder option.");
-  const sceneArg=args.find((s,i)=>!s.startsWith("--")&&args[i-1]!=="--session");
+  const sceneArg=args.find((s,i)=>!s.startsWith("--")&&!["--session","--regular-take"].includes(args[i-1]));
+  const only=value("--regular-take");
+  assert(only===undefined || ["1","2"].includes(only),"Choose --regular-take 1 or 2.");
   const names=sceneArg?sceneArg.split(","):all;
   assert(names.length && names.every(n=>all.includes(n)) && new Set(names).size===names.length,"Choose distinct S1–S8 IDs.");
-  return {names,dir:value("--session"),rehearsal:args.includes("--rehearsal"),actions:args.includes("--isolated-rehearsal-actions"),
+  return {names,dir:value("--session"),regularTake:only?Number(only):null,rehearsal:args.includes("--rehearsal"),actions:args.includes("--isolated-rehearsal-actions"),
           gallery:args.includes("--archive-gallery"),compose:args.includes("--compose-only"),cleanup:args.includes("--cleanup"),
           allowPartial:args.includes("--allow-partial")};
 }
@@ -233,6 +235,7 @@ async function runRecorder(api,args) {
       try {
         if(opts.cleanup) { for(const c of cameras) await cleanup(c,browser,api); return; }
         for(const c of cameras){
+          if(opts.regularTake && c.data.camera!==opts.regularTake)continue;
           const ordered=regularOrder.filter(scene=>opts.names.includes(scene));
           const runCamera=async()=>{
             let failed=false;
@@ -263,6 +266,11 @@ async function runRecorder(api,args) {
             });
           } else failed=await runCamera();
           if(failed&&!opts.allowPartial) break;
+        }
+        if(opts.regularTake){
+          if(faults.length)throw Error(faults.join("\n"));
+          console.log("Saved ordinary camera "+opts.regularTake+" in "+session);
+          return;
         }
         if(!faults.length||opts.allowPartial){
           for(const scene of ["S5","S6","S7"].filter(n=>opts.names.includes(n))){
