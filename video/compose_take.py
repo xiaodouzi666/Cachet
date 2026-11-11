@@ -1,9 +1,10 @@
-"""Cut idle intervals from genuine recordings and place their marked screenshots on the output timeline."""
+"""Cut documented waiting or identical frozen frames out of genuine browser footage."""
 
 import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -33,14 +34,14 @@ def encode(args):
 
 def sha(path):
     with path.open("rb") as handle:
-        digest = hashlib.sha256()
+        value = hashlib.sha256()
         for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-        return digest.hexdigest()
+            value.update(block)
+        return value.hexdigest()
 
 
 def video_info(path):
-    data = json.loads(
+    result = json.loads(
         subprocess.check_output(
             [
                 "ffprobe",
@@ -56,9 +57,9 @@ def video_info(path):
             ]
         )
     )
-    if data["streams"] != [{"width": 1920, "height": 1080}]:
-        raise ValueError(f"Expected a 1920×1080 recording: {path.name}")
-    return float(data["format"]["duration"])
+    if result["streams"] != [{"width": 1920, "height": 1080}]:
+        raise ValueError(f"Expected 1920×1080 source: {path.name}")
+    return float(result["format"]["duration"])
 
 
 def sources_for(scene):
@@ -69,10 +70,187 @@ def sources_for(scene):
     return ["regular", "soak"] if scene in ("S5", "S6") else ["regular"]
 
 
-def compose(raw, dest, manifest, scene, tmp):
-    chunks, marks, segments, files = [], [], {}, {}
-    frames = 0
-    common = [
+def subtract(spans, cuts):
+    """Subtract half-open frame intervals, preserving every other frame."""
+    for left, right in sorted(cuts):
+        retained = []
+        for a, b in spans:
+            if b <= left or a >= right:
+                retained.append((a, b))
+            else:
+                if a < left:
+                    retained.append((a, left))
+                if b > right:
+                    retained.append((right, b))
+        spans = retained
+    return spans
+
+
+def frozen(path, frames):
+    # Zero noise tolerance is deliberate. Moving spinners, cursor movement and small numeric
+    # updates remain footage unless the recorder explicitly identified a wait.
+    process = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-nostats",
+            "-threads",
+            "2",
+            "-filter_threads",
+            "1",
+            "-i",
+            str(path),
+            "-an",
+            "-vf",
+            "freezedetect=n=0:d=5",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    start = None
+    windows = []
+    for which, seconds in re.findall(
+        r"lavfi\.freezedetect\.freeze_(start|end): ([0-9.eE+-]+)",
+        process.stderr.decode(),
+    ):
+        frame = round(float(seconds) * FPS)
+        if which == "start":
+            start = frame
+        elif start is not None:
+            windows.append((start, frame, "identical-frames"))
+            start = None
+    if start is not None:
+        windows.append((start, frames, "identical-frames"))
+    return windows
+
+
+def shot(raw, at_ms, path):
+    encode(["-ss", f"{at_ms/1000:.4f}", "-i", raw, "-frames:v", "1", path])
+    if not path.is_file():
+        raise ValueError("No camera frame at the marked time")
+
+
+def register_frame(source, stamp, still, frames):
+    """Locate the original browser screenshot on the camera's media clock."""
+    predicted = min(frames - 1, max(0, round(stamp * FPS / 1000)))
+    begin = max(0, predicted - FPS)
+    end = min(frames, predicted + FPS + 1)
+    filter_ = "scale=96:54,format=gray"
+    setup = [
+        "ffmpeg",
+        "-nostdin",
+        "-v",
+        "error",
+        "-threads",
+        "2",
+        "-filter_threads",
+        "1",
+    ]
+    target = subprocess.check_output(
+        [
+            *setup,
+            "-i",
+            str(still),
+            "-vf",
+            filter_,
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-",
+        ]
+    )
+    raw = subprocess.check_output(
+        [
+            *setup,
+            "-ss",
+            f"{begin/FPS:.4f}",
+            "-i",
+            str(source),
+            "-vf",
+            "fps=25," + filter_,
+            "-frames:v",
+            str(end - begin),
+            "-f",
+            "rawvideo",
+            "-",
+        ]
+    )
+    size = 96 * 54
+    if len(target) != size or len(raw) < size:
+        raise ValueError(
+            "Cannot align a marked browser screenshot with the original video"
+        )
+
+    def deviation(index):
+        frame = raw[index * size : (index + 1) * size]
+        return (
+            sum(abs(x - y) for x, y in zip(target, frame)),
+            abs(begin + index - predicted),
+        )
+
+    index = min(range(len(raw) // size), key=deviation)
+    if deviation(index)[0] / size > 20:
+        raise ValueError(
+            f"The recorded screenshot {still.name} could not be located on its original camera"
+        )
+    return begin + index
+
+
+def join_motion(source, ranges, parts, options, tmp):
+    if not ranges:
+        return 0
+    first, last = ranges[0][0], ranges[-1][1]
+    expression = "+".join(f"between(n,{a-first},{b-first-1})" for a, b in ranges)
+    length = sum(b - a for a, b in ranges)
+    clip = tmp / f"{len(parts):03d}.webm"
+    encode(
+        [
+            "-ss",
+            f"{first/FPS:.4f}",
+            "-t",
+            f"{(last-first)/FPS:.4f}",
+            "-i",
+            source,
+            "-vf",
+            f"fps=25,select='{expression}',setpts=N/(25*TB)",
+            "-frames:v",
+            length,
+            *options,
+            clip,
+        ]
+    )
+    count = int(
+        subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-count_packets",
+                "-show_entries",
+                "stream=nb_read_packets",
+                "-of",
+                "csv=p=0",
+                str(clip),
+            ]
+        )
+    )
+    if abs(count - length) > 1:
+        raise ValueError(
+            f"Retained frame count differs from edit map ({count} vs {length})"
+        )
+    parts.append(clip)
+    return count
+
+
+def compose(raw, dest, manifest, scene, tmp, crf):
+    options = [
         "-an",
         "-c:v",
         "libvpx-vp9",
@@ -87,112 +265,125 @@ def compose(raw, dest, manifest, scene, tmp):
         "-b:v",
         "0",
         "-crf",
-        "29",
+        str(crf),
         "-pix_fmt",
         "yuv420p",
         "-r",
         str(FPS),
     ]
+    parts = []
+    marks = []
+    sources = {}
+    output_frame = 0
     for kind in sources_for(scene):
         source_scene = "S5" if kind == "decision" else scene
         source_kind = "regular" if kind == "decision" else kind
-        record = manifest["segments"][f"{source_scene}-{source_kind}"]
-        if record["status"] != "captured" or not record["events"]:
-            raise ValueError(f"Incomplete source {scene}-{kind}")
-        prefix = source_scene if source_kind == "regular" else source_scene + "-soak"
-        source_dir = (raw / record.get("sourceDir", ".")).resolve()
+        entry = manifest["segments"][source_scene + "-" + source_kind]
+        source_dir = (raw / entry.get("sourceDir", ".")).resolve()
         if not source_dir.is_relative_to(raw):
-            raise ValueError("Evidence directory escapes the sealed take")
+            raise ValueError("Evidence directory escapes the take")
+        prefix = source_scene + ("-soak" if source_kind == "soak" else "")
         source = source_dir / (prefix + ".webm")
         duration = video_info(source)
-        source_frames = max(1, math.floor(duration * FPS))
-        source_id = sha(source)
-        segments[kind] = {
-            "source_video_sha256": source_id,
-            "source_duration_ms": round(duration * 1000),
-            "evidence": record.get("evidence", {}),
-        }
-        last_ms = -1
-        previous_frame = 0
-        chosen = record["events"]
-        if source_scene == "S5" and source_kind == "regular":
-            chosen = [
-                p
-                for p in chosen
-                if (p["label"] == "live-buy-decision") == (kind == "decision")
-            ]
-        if not chosen:
-            raise ValueError(f"Missing required visual evidence in {prefix}")
-        for point in chosen:
-            label = point["label"]
+        frames = max(1, round(duration * FPS))
+        points = []
+        previous_ms = -1
+        for event in entry["events"]:
+            name = event["label"]
             if (
-                not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", label)
-                or point["ms"] < last_ms
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name)
+                or event["ms"] < previous_ms
             ):
-                raise ValueError(f"Invalid evidence mark in {prefix}")
-            last_ms = point["ms"]
-            still = source_dir / (prefix + "-" + label + ".png")
-            canonical = "soak-" + label if kind == "soak" else label
-            name = scene + "-" + canonical + ".png"
-            if name in files:
-                raise ValueError(f"Duplicate mark {name}")
-            end = max(0, min(round(last_ms * FPS / 1000), source_frames))
-            # A synchronized request has a real common UTC time, but no Playwright still;
-            # capture the corresponding frame of this camera, never the other angle.
-            if not still.exists() and point.get("actionKey") and point.get("utc"):
-                still = tmp / (canonical + "-source.png")
-                encode(
-                    [
-                        "-ss",
-                        f"{min(end, max(source_frames-2,0))/FPS:.3f}",
-                        "-i",
-                        source,
-                        "-frames:v",
-                        "1",
-                        still,
-                    ]
-                )
-            if not still.exists():
-                raise ValueError(f"Missing genuine screenshot for {prefix}/{label}")
-            source_still = sha(still)
-            normalized = tmp / name
-            encode(
-                [
-                    "-i",
-                    still,
-                    "-vf",
-                    "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1",
-                    "-frames:v",
-                    "1",
-                    normalized,
-                ]
+                raise ValueError(f"Invalid mark in {prefix}")
+            previous_ms = event["ms"]
+            still = source_dir / (prefix + "-" + name + ".png")
+            popup = name == "sandbox-wallet-open"
+            if (not still.exists() and not event.get("actionKey")) or event[
+                "ms"
+            ] > duration * 1000 + 1500:
+                raise ValueError(f"Unverifiable source mark {name}")
+            frame = min(frames - 1, max(0, round(event["ms"] * FPS / 1000)))
+            if still.exists() and not popup:
+                frame = register_frame(source, event["ms"], still, frames)
+            points.append((event, frame, still, popup))
+        all_frames = [(0, frames)]
+        if source_scene == "S5" and source_kind == "regular":
+            decision = next(
+                (f for e, f, _, _ in points if e["label"] == "live-buy-decision"), None
             )
-            still = normalized
-            files[name] = still
-            start = max(previous_frame, end - (24 if previous_frame else 0))
-            motion = end - start
-            popup = label == "sandbox-wallet-open"
-            if motion > 0 and not popup:
-                out = tmp / f"{len(chunks):03d}.webm"
-                encode(
-                    [
-                        "-ss",
-                        f"{start/FPS:.3f}",
-                        "-i",
-                        source,
-                        "-vf",
-                        "fps=25,tpad=stop_mode=clone:stop_duration=1",
-                        "-frames:v",
-                        motion,
-                        *common,
-                        out,
-                    ]
+            if decision is None:
+                raise ValueError(
+                    "The S4 decision needs the same wallet's filmed S5 explanation"
                 )
-                chunks.append(out)
-                frames += motion
-            previous_frame = end
-            hold = 65 if popup else 45
-            p = tmp / f"{len(chunks):03d}.webm"
+            later = [
+                f
+                for e, f, _, _ in points
+                if e["label"] != "live-buy-decision" and f > decision
+            ]
+            window = (
+                max(0, decision - 2 * FPS),
+                min(frames, decision + 3 * FPS, min(later) if later else frames),
+            )
+            if kind == "decision":
+                all_frames = [window]
+                points = [p for p in points if p[0]["label"] == "live-buy-decision"]
+            else:
+                # Keep the full start-to-finish regular S5 action for the editor. The
+                # short decision excerpt is also available in the previous quote scene.
+                points = [p for p in points if p[0]["label"] != "live-buy-decision"]
+        if not points:
+            raise ValueError(f"No photographed events for {scene}/{kind}")
+        # Ensure that each key moment and its lead-in/reaction survive the cut. Never use the
+        # time between two screenshots as evidence that a browser was idle.
+        protected = [
+            (max(0, f - FPS), min(frames, f + FPS + 1)) for _, f, _, _ in points
+        ]
+        waits = frozen(source, frames)
+        waits.extend(
+            (
+                math.ceil(w["start_ms"] * FPS / 1000),
+                math.floor(w["end_ms"] * FPS / 1000),
+                w["reason"],
+            )
+            for w in entry.get("waits", [])
+            if w["reason"]
+            in {
+                "server-retry-after",
+                "document-navigation",
+                "separate-sandbox-approval-window",
+            }
+        )
+        cuts = []
+        removed = []
+        for a, b, reason in waits:
+            if b - a < 5 * FPS:
+                continue
+            # Retain entry into and exit from the wait. Display-only scenes get longer bookends.
+            pad = 2 * FPS if scene in {"S1", "S2", "S8"} else FPS
+            for available_start, available_end in subtract(
+                all_frames, protected + cuts
+            ):
+                left = max(available_start, a + pad)
+                right = min(available_end, b - pad)
+                if left < right:
+                    cuts.append((left, right))
+                    removed.append(
+                        {"start_ms": left * 40, "end_ms": right * 40, "reason": reason}
+                    )
+        ranges = subtract(all_frames, cuts)
+        popup = next((p for p in points if p[3]), None)
+        extra = 0
+        if popup:
+            _, at, still, _ = popup
+            actual_before = join_motion(
+                source,
+                [(a, min(b, at)) for a, b in ranges if a < at],
+                parts,
+                options,
+                tmp,
+            )
+            clip = tmp / f"{len(parts):03d}.webm"
+            extra = 2 * FPS
             encode(
                 [
                     "-loop",
@@ -204,42 +395,79 @@ def compose(raw, dest, manifest, scene, tmp):
                     "-vf",
                     "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1",
                     "-frames:v",
-                    hold,
-                    *common,
-                    p,
+                    extra,
+                    *options,
+                    clip,
                 ]
             )
-            chunks.append(p)
+            parts.append(clip)
+            actual_after = join_motion(
+                source,
+                [(max(a, at), b) for a, b in ranges if b > at],
+                parts,
+                options,
+                tmp,
+            )
+            length = actual_before + extra + actual_after
+        else:
+            length = join_motion(source, ranges, parts, options, tmp)
+        if not length:
+            raise ValueError(f"No usable motion for {scene}/{kind}")
+        for event, frame, still, is_popup in points:
+            if not any(a <= frame < b for a, b in ranges):
+                raise ValueError(f"Cut would remove {event['label']}")
+            index = sum(max(0, min(frame, b) - a) for a, b in ranges if a < frame)
+            if is_popup:
+                index = actual_before + extra // 2
+            elif popup and frame >= popup[1]:
+                index += extra
             mark = {
-                "label": canonical,
-                "ms": round((frames + hold // 2) * 1000 / FPS),
+                "label": ("soak-" if kind == "soak" else "") + event["label"],
+                "ms": 40 * (output_frame + min(index, length - 1)),
+                "raw_ms": event["ms"],
+                "source_frame_ms": 40 * frame,
                 "source": kind,
-                "raw_ms": last_ms,
-                "screenshot_sha256": sha(still),
-                "source_screenshot_sha256": source_still,
             }
-            for key in ("utc", "actionKey"):
-                if key in point:
-                    mark[key] = point[key]
+            if still.exists():
+                mark["source_screenshot_sha256"] = sha(still)
+            for field in ("utc", "actionKey"):
+                if field in event:
+                    mark[field] = event[field]
             marks.append(mark)
-            frames += hold
+        sources[kind] = {
+            "source_video_sha256": sha(source),
+            "source_duration_ms": round(duration * 1000),
+            "kept_source_ranges_ms": [[a * 40, b * 40] for a, b in ranges],
+            "removed_waits": removed,
+            "inserted_popup_ms": extra * 40,
+            "evidence": entry.get("evidence", {}),
+        }
+        output_frame += length
     playlist = tmp / "clips.ffconcat"
     playlist.write_text(
-        "ffconcat version 1.0\n" + "".join(f"file '{c.name}'\n" for c in chunks)
+        "ffconcat version 1.0\n" + "".join(f"file '{p.name}'\n" for p in parts)
     )
     out = tmp / (scene + ".webm")
     encode(["-f", "concat", "-safe", "1", "-i", playlist, "-c", "copy", out])
-    final_ms = round(video_info(out) * 1000)
-    if abs(final_ms - frames * 1000 / FPS) > 100 or marks[-1]["ms"] >= final_ms:
-        raise ValueError(f"Encoded media clock differs from {scene} timeline")
-    for name, still in files.items():
-        shutil.copyfile(still, dest / name)
+    ms = round(video_info(out) * 1000)
+    if abs(ms - output_frame * 40) > 120:
+        raise ValueError("Encoded media clock differs from kept original footage")
+    marks.sort(key=lambda e: e["ms"])
+    seen = set()
+    for mark in marks:
+        if mark["label"] in seen or mark["ms"] >= ms:
+            raise ValueError("Invalid or duplicated edited milestone")
+        seen.add(mark["label"])
+        name = scene + "-" + mark["label"] + ".png"
+        shot(out, mark["ms"], tmp / name)
+        mark["screenshot_sha256"] = sha(tmp / name)
+        (tmp / name).replace(dest / name)
     out.replace(dest / out.name)
     return {
         "status": "captured",
-        "duration_ms": final_ms,
+        "duration_ms": ms,
         "events": marks,
-        "segments": segments,
+        "segments": sources,
         "video_sha256": sha(dest / out.name),
     }
 
@@ -249,13 +477,19 @@ def main():
     parser.add_argument("raw", type=Path)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--scenes", default=",".join(SCENES))
+    parser.add_argument(
+        "--crf",
+        type=int,
+        default=int(os.environ.get("CACHET_VIDEO_CRF", "31")),
+        choices=range(20, 46),
+    )
     args = parser.parse_args()
     raw, dest = args.raw.resolve(), args.destination.resolve()
     if raw == dest:
         parser.error(
-            "Keep sealed raw evidence and edited material in different directories"
+            "Keep the original source directory separate from the edited handoff"
         )
-    manifest = json.loads((raw / "segments.json").read_text())
+    manifest = json.loads((raw / "segments.json").read_bytes())
     dest.mkdir(parents=True, exist_ok=True)
     result = {k: manifest[k] for k in ("origin", "rehearsal", "session", "camera")}
     result["regular_wallet_cleanup"] = manifest.get("cleanup", {})
@@ -265,15 +499,17 @@ def main():
             parser.error("Unknown scene")
         if not all(
             manifest["segments"]
-            .get("S5-regular" if kind == "decision" else f"{scene}-{kind}", {})
+            .get("S5-regular" if k == "decision" else f"{scene}-{k}", {})
             .get("status")
             == "captured"
-            for kind in sources_for(scene)
+            for k in sources_for(scene)
         ):
             result["scenes"][scene] = {"status": "incomplete", "events": []}
             continue
         with TemporaryDirectory(dir=dest) as d:
-            result["scenes"][scene] = compose(raw, dest, manifest, scene, Path(d))
+            result["scenes"][scene] = compose(
+                raw, dest, manifest, scene, Path(d), args.crf
+            )
     tmp = dest / "timeline.json.tmp"
     tmp.write_text(json.dumps(result, indent=2) + "\n")
     tmp.replace(dest / "timeline.json")

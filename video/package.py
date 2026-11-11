@@ -126,6 +126,14 @@ def verify_pair(takes):
             and each[0]["video_sha256"] == each[1]["video_sha256"]
         ):
             raise ValueError(f"Duplicate financial footage for {scene}")
+        if scene in {"S5", "S6", "S7"}:
+            first, second = (
+                entry["segments"]["soak"]["source_video_sha256"] for entry in each
+            )
+            if first == second:
+                raise ValueError(
+                    f"The two {scene} angles share an identical original camera recording"
+                )
     cash = []
     for t in takes:
         components = t["scenes"]
@@ -138,8 +146,14 @@ def verify_pair(takes):
         task = evidence("S5", "regular")
         ordinary = evidence("S6", "regular")
         prefix = evidence("S1", "regular")
-        if prefix.get("runId") != task["runId"] or prefix.get("workspaceId") != task["workspaceId"] or prefix.get("mode") != "live":
-            raise ValueError("S1 must show the completed ten-turn live run from the same camera's S5")
+        if (
+            prefix.get("runId") != task["runId"]
+            or prefix.get("workspaceId") != task["workspaceId"]
+            or prefix.get("mode") != "live"
+        ):
+            raise ValueError(
+                "S1 must show the completed ten-turn live run from the same camera's S5"
+            )
         cleanup = t["regular_wallet_cleanup"]
         if not (
             publish["workspaceId"] == task["workspaceId"] == ordinary["workspaceId"]
@@ -185,6 +199,15 @@ def verify_pair(takes):
             ):
                 raise ValueError(
                     f"No filmed original transaction submission in {scene}"
+                )
+            expected = (
+                parts[1]["provider"]["authorization_id"]
+                if scene == "S6"
+                else parts[2]["mandateId"]
+            )
+            if events[0]["actionKey"] != expected:
+                raise ValueError(
+                    f"The {scene} submission does not belong to the recorded original authorization"
                 )
             signed.append((events[0]["actionKey"], events[0]["utc"]))
         cash.append(

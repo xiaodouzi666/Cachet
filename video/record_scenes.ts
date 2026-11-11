@@ -72,7 +72,7 @@ async function approve(
   page,
   state,
   mark = quietMark,
-  { walletOnly = false } = {},
+  { walletOnly = false, waitForEvidence = (_, run) => run() } = {},
 ) {
   if (!walletOnly && state.card_enabled) {
     await page.getByRole("button", { name: "Use sandbox test card" }).click();
@@ -119,13 +119,14 @@ async function approve(
           mandate.cap_micros > 0 && mandate.cap_micros % 10000 === 0,
         );
       }, { timeout: 30000, message: "Waiting for the workspace wallet order and its verified USD budget" }).toBe(true);
-      await approveSandboxPopup(popup, {
+      if (walletOnly) expect(mandate.cap_micros).toBe(5_000_000);
+      await waitForEvidence("separate-sandbox-approval-window", () => approveSandboxPopup(popup, {
         orderId: mandate.paypal_order_id,
         expectedUsd: (mandate.cap_micros / 1e6).toFixed(2),
         email: state.sandbox_buyer_email,
         password: state.sandbox_buyer_password,
         returnUrl: new URL(page.url()).origin,
-      });
+      }));
     } finally {
       if (!popup.isClosed()) await popup.close();
       await popup.video()?.delete();
@@ -323,13 +324,14 @@ const scenes = {
     return { workspaceId: workspace.workspace_id, starletteId: base.id, fastapiId: child.id,
       minimumProbeRatio:Math.min(base.last_probe_hit_ratio,child.last_probe_hit_ratio) };
   },
-  async S4({ page, go, mark, checkpoint, s3 }) {
+  async S4({ page, go, mark, checkpoint, s3, waitForEvidence }) {
     await go("/agent");
     const state = await readState(page);
     expect(state.workspace_id).toBe(s3.workspaceId);
     expect(state.kind).toBe("judge");
     expect(state.mandate).toBeFalsy();
-    await approve(page, state, mark, { walletOnly: true });
+    await page.getByLabel("Budget (USD)", {exact:true}).fill("5.00");
+    await approve(page, state, mark, { walletOnly: true, waitForEvidence });
     const mandate = (await readState(page)).mandate;
     expect(mandate.cap_micros).toBe(5000000);
     expect(mandate.payment_method).toBe("wallet");
@@ -337,7 +339,7 @@ const scenes = {
     const measured = await quote(page, mark);
     return { quote:measured, mandateId: mandate.id, orderId: mandate.paypal_order_id, authorizationId: mandate.authorization_id };
   },
-  async S5({ page, go, mark, s3, s4 }) {
+  async S5({ page, go, mark, s3, s4, waitForEvidence }) {
     await go("/judge");
     const state = await readState(page);
     expect(state.workspace_id).toBe(s3.workspaceId);
@@ -345,8 +347,9 @@ const scenes = {
     expect(state.mandate?.status).toBe("ACTIVE");
     expect((await readJson(page, "health")).mode).toBe("live");
     // Sponsor traffic ends before filming so the later global cold test is attributable.
-    await expect.poll(async () => (await readJson(page, "judge/walkthrough")).preparation.status,
-      {timeout: 15 * 60 * 1000}).toBe("ready");
+    await waitForEvidence("waiting-for-background-sponsor", () =>
+      expect.poll(async () => (await readJson(page, "judge/walkthrough")).preparation.status,
+        {timeout: 15 * 60 * 1000}).toBe("ready"));
     await page.getByTestId("guide-step-3").click();
     const [started] = await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === "/api/judge/task" && r.request().method() === "POST"),
@@ -376,7 +379,7 @@ const scenes = {
     return {workspaceId: state.workspace_id, mandateId: state.mandate.id, runId,
       calls: turns.map(t => t.id)};
   },
-  async S6({ page, go, mark, s3, s5 }) {
+  async S6({ page, go, mark, s3, s5, waitForEvidence }) {
     await go("/judge");
     const state = await readState(page);
     expect(state.workspace_id).toBe(s5.workspaceId);
@@ -397,7 +400,7 @@ const scenes = {
       if (response.status() === 429) {
         const seconds = Number(response.headers()["retry-after"]);
         if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) throw Error("Invalid global flush cooldown.");
-        await new Promise(resolve => setTimeout(resolve, (seconds + 1) * 1000));
+        await waitForEvidence("server-retry-after", () => new Promise(resolve => setTimeout(resolve, (seconds + 1) * 1000)));
         await go("/judge");
         continue;
       }
@@ -419,8 +422,8 @@ const scenes = {
     const {run_id:coldRun}=await started.json();
     const [cold]=await readRunTurns(page,coldRun,flushId);
     expect(isColdAndFree(cold,flushId)).toBe(true);
-    const coldRow=page.getByTestId("metered-turn").filter({has:page.getByText("Cold · free public prefix",{exact:true})});
-    await expect(coldRow).toHaveAttribute("data-call-id",cold.id);
+    expect(cold.id).toMatch(/^[a-zA-Z0-9_-]+$/);
+    const coldRow=page.locator('[data-testid="metered-turn"][data-call-id="'+cold.id+'"]');
     await expect(coldRow).toContainText("Cold · free public prefix");
     await coldRow.scrollIntoViewIfNeeded();
     await mark("cold-free-public-prefix");

@@ -61,7 +61,7 @@ function proof(req) {
     const p=spawn(process.env.CACHET_PYTHON || "python3",[path.join(__dirname,"soak_readback.py")],
       {cwd:root,stdio:["pipe","pipe","ignore"]});
     let out=""; p.stdout.on("data",c=>out+=c);
-    p.once("error",reject); p.once("exit",code=>{
+    p.once("error",reject); p.once("close",code=>{
       try { assert(code===0,"Original wallet authorization could not be verified with PayPal Sandbox GET.");resolve(JSON.parse(out)); }
       catch(e){reject(e);}
     });
@@ -101,6 +101,20 @@ async function cleanup(camera,browser,api) {
     await camera.save();
   } finally { await ctx.close(); }
 }
+async function waitForSponsor(camera,browser,api) {
+  if(!camera.data.workspaceId || !camera.data.segments["S3-regular"]) return;
+  const saved=await read(path.join(camera.dir,"storage.json"),null);
+  if(!saved) return;
+  const ctx=await browser.newContext({baseURL:camera.data.origin,storageState:saved});
+  try {
+    const p=await ctx.newPage();
+    assert((await api.readState(p)).workspace_id===camera.data.workspaceId,"Cannot inspect another workspace's guide preparation.");
+    await api.expect.poll(async()=>{
+      const guide=await api.readJson(p,"judge/walkthrough");
+      return ["not_started","ready","exhausted","failed"].includes(guide.preparation.status);
+    },{timeout:20*60*1000,intervals:[2000,5000,10000],message:"Waiting for this camera's GPU sponsor to finish before releasing its lease"}).toBe(true);
+  } finally { await ctx.close(); }
+}
 async function recordNormal(camera,scene,browser,api,opts) {
   const m=camera.data, key=scene+"-regular", old=m.segments[key];
   if(old?.status==="captured") return;
@@ -125,13 +139,21 @@ async function recordNormal(camera,scene,browser,api,opts) {
   });
   const start=performance.now();
   let page;
-  const entry={status:"recording",events:[]};
+  const entry={status:"recording",events:[],waits:[]};
   m.segments[key]=entry;
   await camera.save();
   try {
     page=await context.newPage();
+    const waitForEvidence=async(reason,operation)=>{
+      const begin=Math.round(performance.now()-start);
+      try{return await operation();}
+      finally{
+        const end=Math.round(performance.now()-start);
+        if(end-begin>=5000){entry.waits.push({start_ms:begin,end_ms:end,reason});await camera.save();}
+      }
+    };
     const go=async route=>{
-      const res=await page.goto(route+"?rec=1",{waitUntil:"domcontentloaded"});
+      const res=await waitForEvidence("document-navigation",()=>page.goto(route+"?rec=1",{waitUntil:"domcontentloaded"}));
       assert(res?.ok(),"Recording page did not load: "+route);
       await api.expect(page.locator("html")).toHaveClass(/recording/);
     };
@@ -147,13 +169,19 @@ async function recordNormal(camera,scene,browser,api,opts) {
           ...(target!==page?{style:"input,iframe,[autocomplete],address,[data-testid*=address i],[data-testid*=email i],[data-testid*=card i]{visibility:hidden!important}"}:{})});
       entry.events.push({label,ms,screenshot,utc:new Date().toISOString()});
       await camera.save();
+      // A short reading beat for the displayed slides and an encoder tail for live
+      // actions. Wait on displayed animation frames so the video includes the new DOM.
+      await target.evaluate(count=>new Promise(resolve=>{
+        const tick=()=>--count ? requestAnimationFrame(tick) : resolve();
+        requestAnimationFrame(tick);
+      }), ["S1","S2","S8"].includes(scene)?60:8);
     };
     const checkpoint=async facts=>{
       Object.assign(m,facts);
       await atomic(stateFile,await cookieState(context,m.origin));
       await camera.save();
     };
-    entry.evidence=await api.scenes[scene]({page,go,mark,checkpoint,baseURL:m.origin,archiveGallery:opts.gallery,
+    entry.evidence=await api.scenes[scene]({page,go,mark,checkpoint,waitForEvidence,baseURL:m.origin,archiveGallery:opts.gallery,
       s3:m.segments["S3-regular"]?.evidence,s4:m.segments["S4-regular"]?.evidence,s5:m.segments["S5-regular"]?.evidence});
     await checkpoint({});
   } catch(error) {
@@ -229,7 +257,10 @@ async function runRecorder(api,args) {
           if(usesGpu){
             const common=path.resolve(root,execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8"}).trim());
             const lock=process.env.CACHET_GPU_LOCK||path.join(path.dirname(common),".cache/night-gpu.lock");
-            failed=await fileLock(lock,runCamera);
+            failed=await fileLock(lock,async()=>{
+              try { return await runCamera(); }
+              finally { await waitForSponsor(c,browser,api); }
+            });
           } else failed=await runCamera();
           if(failed&&!opts.allowPartial) break;
         }

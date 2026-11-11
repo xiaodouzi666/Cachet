@@ -19,44 +19,66 @@ class EditedMilestones(unittest.TestCase):
             raw = root / "private"
             dest = root / "cut"
             raw.mkdir()
-            # Deliberately blank neutral source for checking the editing clock; the popup marker is a red test card.
+            # Genuine continuous camera movement on either side of a long documented frozen scene.
             encode(
                 [
                     "-f",
                     "lavfi",
                     "-i",
-                    "color=c=navy:s=1920x1080:r=25:d=12",
+                    "testsrc2=s=1920x1080:r=25:d=3",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=navy:s=1920x1080:r=25:d=20",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=s=1920x1080:r=25:d=7",
+                    "-filter_complex_threads",
+                    "1",
+                    "-filter_complex",
+                    "[0:v][1:v][2:v]concat=n=3:v=1:a=0[out]",
+                    "-map",
+                    "[out]",
                     "-an",
                     "-threads",
-                    "2",
+                    "3",
                     "-c:v",
-                    "libvpx-vp9",
+                    "libvpx",
                     "-deadline",
                     "realtime",
                     "-cpu-used",
                     "8",
+                    "-b:v",
+                    "650k",
                     raw / "S4.webm",
                 ]
             )
             for f in ("S5", "S5-soak"):
                 shutil.copyfile(raw / "S4.webm", raw / (f + ".webm"))
-            for image, color, size in (
-                ("S4-sandbox-wallet-open", "red", "1000x700"),
-                ("S4-sandbox-authorized", "teal", "1920x1080"),
-                ("S5-live-buy-decision", "lime", "1920x1080"),
-                ("S5-first-metered-turn", "orange", "1920x1080"),
-                ("S5-soak-table", "purple", "1920x1080"),
+            from compose_take import shot
+
+            # Every non-popup proof comes from its actual original video frame. Only the
+            # popup is an external tab, represented by a separate marked screenshot.
+            encode(
+                [
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=1000x700",
+                    "-frames:v",
+                    "1",
+                    raw / "S4-sandbox-wallet-open.png",
+                ]
+            )
+            for source, label, ms in (
+                ("S4", "sandbox-authorized", 27800),
+                ("S5", "live-buy-decision", 2000),
+                ("S5", "first-metered-turn", 6100),
+                ("S5-soak", "table", 7700),
             ):
-                encode(
-                    [
-                        "-f",
-                        "lavfi",
-                        "-i",
-                        "color=c=" + color + ":s=" + size,
-                        "-frames:v",
-                        "1",
-                        raw / (image + ".png"),
-                    ]
+                shot(
+                    raw / (source + ".webm"), ms, raw / (source + "-" + label + ".png")
                 )
 
             def segment(points):
@@ -75,7 +97,7 @@ class EditedMilestones(unittest.TestCase):
                     "S4-regular": segment(
                         [
                             {"label": "sandbox-wallet-open", "ms": 1200},
-                            {"label": "sandbox-authorized", "ms": 10800},
+                            {"label": "sandbox-authorized", "ms": 27800},
                         ]
                     ),
                     "S5-regular": segment(
@@ -97,6 +119,9 @@ class EditedMilestones(unittest.TestCase):
                     ),
                 },
             }
+            data["segments"]["S4-regular"]["waits"] = [
+                {"start_ms": 3000, "end_ms": 23000, "reason": "server-retry-after"}
+            ]
             (raw / "segments.json").write_text(json.dumps(data))
             subprocess.run(
                 [
@@ -111,7 +136,30 @@ class EditedMilestones(unittest.TestCase):
             )
             out = json.loads((dest / "timeline.json").read_bytes())
             s4 = out["scenes"]["S4"]
-            self.assertLess(s4["duration_ms"], 9000)
+            regular = s4["segments"]["regular"]
+            self.assertEqual(regular["inserted_popup_ms"], 2000)
+            self.assertTrue(regular["removed_waits"])
+            self.assertTrue(
+                any(a == 0 and b >= 2800 for a, b in regular["kept_source_ranges_ms"])
+            )
+            self.assertTrue(
+                any(
+                    a <= 24000 and b >= 29500
+                    for a, b in regular["kept_source_ranges_ms"]
+                )
+            )
+            self.assertLess(
+                sum(b - a for a, b in regular["kept_source_ranges_ms"]), 18000
+            )
+            reflected = (
+                sum(
+                    b - a
+                    for src in s4["segments"].values()
+                    for a, b in src["kept_source_ranges_ms"]
+                )
+                + 2000
+            )
+            self.assertLessEqual(abs(s4["duration_ms"] - reflected), 120)
             self.assertEqual(
                 [p["label"] for p in s4["events"]],
                 ["sandbox-wallet-open", "sandbox-authorized", "live-buy-decision"],
