@@ -2,6 +2,8 @@
 
 Cachet lets coding agents buy warm open-source context. The engine counts reused tokens, the ledger attributes royalties to publishers, and PayPal Sandbox handles the money.
 
+[Open the hosted six-step Judge Mode](https://cachet-web-cx6f2.onrender.com/judge) to try a sandbox budget. The [public API health response](https://cachet-api-cx6f2.onrender.com/api/health) reports the current inference mode.
+
 ![Cachet showing cache hits for each source layer on the first turn of a recorded FastAPI task](docs/images/measured-prefix-segments.png)
 
 On this turn the engine reused 25,913 of 26,260 input tokens. The inspector attributes 11,992 hits to Starlette and 13,908 to FastAPI. The remaining 13 hits belong to the system prefix. [Recorded turn and token ranges](backend/app/replay/traces/rate-limit-buy.json)
