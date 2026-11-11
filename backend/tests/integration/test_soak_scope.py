@@ -23,7 +23,9 @@ def test_operator_soak_needs_independent_secret_and_workspace(tmp_path, monkeypa
     app = FastAPI()
     app.include_router(agent_router)
     app.include_router(finance_router)
-    with TestClient(app) as client:
+    # Exercise the deployed Secure cookie policy over an HTTPS test origin.
+    monkeypatch.setenv("PUBLIC_WEB_URL", "https://testserver")
+    with TestClient(app, base_url="https://testserver") as client:
         route = "/api/operator/soak-registration"
         admin = {"X-Admin-Token":general}
         full = {**admin, "X-Cachet-Soak-Token":operator}
@@ -35,7 +37,9 @@ def test_operator_soak_needs_independent_secret_and_workspace(tmp_path, monkeypa
         assert client.get(route, headers={**admin, "X-Cachet-Soak-Token":general}).status_code == 403
         assert client.get(route, headers=full).json() == {"workspace_id":None, "mandate_id":None}
         assert client.post("/api/operator/soak/reserve", json={"mandate_id":"unbound", "context_id":"unbound"}, headers=full).status_code == 401
-        client.post("/api/judge/workspace", json={"kind":"judge"}, headers=admin).raise_for_status()
+        opened = client.post("/api/judge/workspace", json={"kind":"judge"}, headers=admin).raise_for_status()
+        assert "secure" in opened.headers["set-cookie"].lower()
+        assert client.get("/api/judge/state", headers=admin).json()["workspace_id"] == opened.json()["workspace_id"]
         assert client.post("/api/operator/soak/unbound/runs", json={"sequence":1}, headers=full).status_code == 403
         assert client.post("/api/operator/soak/unbound/runs", json={"sequence":1,"task_text":"arbitrary"}, headers=full).status_code == 422
         monkeypatch.setenv("CACHET_SOAK_TOKEN", general)
