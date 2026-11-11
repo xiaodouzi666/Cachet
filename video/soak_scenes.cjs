@@ -101,7 +101,11 @@ async function intent(b,scene,before){
 }
 function actionEvent(cams,label,key){
   const t=performance.now(), utc=new Date().toISOString();
-  for(const cam of cams)cam.events.push({label,ms:Math.round(t-cam.start),utc,actionKey:key});
+  for(const cam of cams){
+    const event={label,ms:Math.round(t-cam.start),utc,actionKey:key};
+    cam.events.push(event);
+    require("node:fs").appendFileSync(path.join(cam.dir,cam.scene+"-soak-action-events.jsonl"),JSON.stringify(event)+"\n",{mode:0o600,flush:true});
+  }
 }
 function checkDisplayedMoney(text, micros){
   const match = text.match(/(?:\$|USD\s*)?(-?[\d,]+(?:\.\d+)?)/);
@@ -146,11 +150,19 @@ async function cameras(browser,b,dirs,scene){
 async function finish(cam,success){
   const video=cam.page.video();
   try{
+    await fs.writeFile(path.join(cam.dir,cam.scene+"-soak-source-events.json"),
+      JSON.stringify({status:success?"captured":"incomplete",events:cam.events},null,2)+"\n",{mode:0o600});
+    if(success)await cam.page.evaluate(()=>new Promise(resolve=>{
+      let n=8;const tick=()=>--n?requestAnimationFrame(tick):resolve();requestAnimationFrame(tick);
+    }));
     await cam.context.close();
-    if(success)await video.saveAs(path.join(cam.dir,cam.scene+"-soak.webm"));
-  }finally{
-    if(video)await video.delete().catch(()=>{});
+    if(video){
+      await video.saveAs(path.join(cam.dir,cam.scene+"-soak"+(success?"":"-incomplete")+".webm"));
+      await video.delete();
+    }
     await fs.rm(cam.scratch,{recursive:true,force:true});
+  }finally{
+    await cam.context.close().catch(()=>{});
   }
 }
 async function tab(page,name){

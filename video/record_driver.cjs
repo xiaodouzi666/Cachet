@@ -139,13 +139,21 @@ async function recordNormal(camera,scene,browser,api,opts) {
   });
   const start=performance.now();
   let page;
-  const entry={status:"recording",events:[]};
+  const entry={status:"recording",events:[],waits:[]};
   m.segments[key]=entry;
   await camera.save();
   try {
     page=await context.newPage();
+    const waitForEvidence=async(reason,operation)=>{
+      const begin=Math.round(performance.now()-start);
+      try{return await operation();}
+      finally{
+        const end=Math.round(performance.now()-start);
+        if(end-begin>=5000){entry.waits.push({start_ms:begin,end_ms:end,reason});await camera.save();}
+      }
+    };
     const go=async route=>{
-      const res=await page.goto(route+"?rec=1",{waitUntil:"domcontentloaded"});
+      const res=await waitForEvidence("document-navigation",()=>page.goto(route+"?rec=1",{waitUntil:"domcontentloaded"}));
       assert(res?.ok(),"Recording page did not load: "+route);
       await api.expect(page.locator("html")).toHaveClass(/recording/);
     };
@@ -161,13 +169,19 @@ async function recordNormal(camera,scene,browser,api,opts) {
           ...(target!==page?{style:"input,iframe,[autocomplete],address,[data-testid*=address i],[data-testid*=email i],[data-testid*=card i]{visibility:hidden!important}"}:{})});
       entry.events.push({label,ms,screenshot,utc:new Date().toISOString()});
       await camera.save();
+      // A short reading beat for the displayed slides and an encoder tail for live
+      // actions. Wait on displayed animation frames so the video includes the new DOM.
+      await target.evaluate(count=>new Promise(resolve=>{
+        const tick=()=>--count ? requestAnimationFrame(tick) : resolve();
+        requestAnimationFrame(tick);
+      }), ["S1","S2","S8"].includes(scene)?60:8);
     };
     const checkpoint=async facts=>{
       Object.assign(m,facts);
       await atomic(stateFile,await cookieState(context,m.origin));
       await camera.save();
     };
-    entry.evidence=await api.scenes[scene]({page,go,mark,checkpoint,baseURL:m.origin,archiveGallery:opts.gallery,
+    entry.evidence=await api.scenes[scene]({page,go,mark,checkpoint,waitForEvidence,baseURL:m.origin,archiveGallery:opts.gallery,
       s3:m.segments["S3-regular"]?.evidence,s4:m.segments["S4-regular"]?.evidence,s5:m.segments["S5-regular"]?.evidence});
     await checkpoint({});
   } catch(error) {
