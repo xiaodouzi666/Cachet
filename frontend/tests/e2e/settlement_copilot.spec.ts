@@ -7,6 +7,7 @@ const callId = process.env.CACHET_COPILOT_CALL_ID;
 const mandateId = process.env.CACHET_COPILOT_MANDATE_ID;
 
 async function question(page: Page, text: string, tool: string) {
+  await page.evaluate(() => { delete (window as Window & { __studioStream?: string }).__studioStream; });
   await page.getByRole("textbox", { name: "Message input" }).fill(text);
   const stream = page.waitForResponse(
     (response) => new URL(response.url()).pathname === "/api/copilot" && response.request().method() === "POST",
@@ -14,7 +15,9 @@ async function question(page: Page, text: string, tool: string) {
   await page.getByRole("button", { name: "Send message" }).click();
   const response = await stream;
   expect(response.ok()).toBeTruthy();
-  const body = await response.text();
+  await page.waitForFunction(() => typeof (window as Window & { __studioStream?: string }).__studioStream === "string",
+    undefined, { timeout: 120_000 });
+  const body = await page.evaluate(() => (window as Window & { __studioStream?: string }).__studioStream!);
   expect(body).toContain("event: done");
   expect(body).toContain(tool);
   expect(body).not.toContain("event: error");
@@ -77,6 +80,20 @@ test("answers the judge's three questions through the Studio agent and confirms 
   const royalties: { publisher_id: string; hit_tokens: number }[] = await read("royalties");
   const publisherIds = [...new Set(royalties.filter(r => r.hit_tokens > 0).map(r => r.publisher_id))];
   expect(publisherIds.length).toBeGreaterThanOrEqual(2);
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const response = await fetch(...args);
+      if (new URL(response.url, window.location.href).pathname === "/api/copilot") {
+        // Chrome may evict CDP bodies for completed event streams. Observe a copy
+        // inside the live page while the Studio consumes the original stream.
+        void response.clone().text().then(body => {
+          (window as Window & { __studioStream?: string }).__studioStream = body;
+        });
+      }
+      return response;
+    };
+  });
   await page.goto("/settlement");
   await page.getByRole("button", { name: /Ops Copilot/ }).click();
   const weekly = await question(page, "How much did Starlette earn this week, and why more per token than FastAPI?", "publisher_earnings");
