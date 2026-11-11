@@ -1,5 +1,5 @@
 {
-  "measured_at": "2026-11-09T05:51:02.981142+00:00",
+  "measured_at": "2026-11-11T00:15:19.081945+00:00",
   "bands": [
     {
       "prefix_tokens": 2000,
@@ -9,65 +9,65 @@
           "cold": {
             "prompt_tokens": 2017,
             "cached_tokens": 0,
-            "ttft_ms": 387.059
+            "ttft_ms": 389.303
           },
           "warm": {
             "prompt_tokens": 2017,
             "cached_tokens": 2016,
-            "ttft_ms": 28.289
+            "ttft_ms": 28.715
           }
         },
         {
           "cold": {
             "prompt_tokens": 2017,
             "cached_tokens": 0,
-            "ttft_ms": 380.244
+            "ttft_ms": 385.42
           },
           "warm": {
             "prompt_tokens": 2017,
             "cached_tokens": 2016,
-            "ttft_ms": 27.93
+            "ttft_ms": 28.152
           }
         },
         {
           "cold": {
             "prompt_tokens": 2017,
             "cached_tokens": 0,
-            "ttft_ms": 385.218
+            "ttft_ms": 382.582
           },
           "warm": {
             "prompt_tokens": 2017,
             "cached_tokens": 2016,
-            "ttft_ms": 27.799
+            "ttft_ms": 28.012
           }
         },
         {
           "cold": {
             "prompt_tokens": 2017,
             "cached_tokens": 0,
-            "ttft_ms": 382.956
+            "ttft_ms": 382.896
           },
           "warm": {
             "prompt_tokens": 2017,
             "cached_tokens": 2016,
-            "ttft_ms": 27.417
+            "ttft_ms": 27.571
           }
         },
         {
           "cold": {
             "prompt_tokens": 2017,
             "cached_tokens": 0,
-            "ttft_ms": 383.823
+            "ttft_ms": 382.519
           },
           "warm": {
             "prompt_tokens": 2017,
             "cached_tokens": 2016,
-            "ttft_ms": 27.765
+            "ttft_ms": 27.944
           }
         }
       ],
-      "cold_p50_ms": 383.823,
-      "warm_p50_ms": 27.799
+      "cold_p50_ms": 382.896,
+      "warm_p50_ms": 28.012
     },
     {
       "prefix_tokens": 4000,
@@ -77,65 +77,65 @@
           "cold": {
             "prompt_tokens": 4017,
             "cached_tokens": 0,
-            "ttft_ms": 782.744
+            "ttft_ms": 788.865
           },
           "warm": {
             "prompt_tokens": 4017,
             "cached_tokens": 4016,
-            "ttft_ms": 27.828
+            "ttft_ms": 27.941
           }
         },
         {
           "cold": {
             "prompt_tokens": 4017,
             "cached_tokens": 0,
-            "ttft_ms": 778.444
+            "ttft_ms": 783.093
           },
           "warm": {
             "prompt_tokens": 4017,
             "cached_tokens": 4016,
-            "ttft_ms": 28.228
+            "ttft_ms": 27.994
           }
         },
         {
           "cold": {
             "prompt_tokens": 4017,
             "cached_tokens": 0,
-            "ttft_ms": 785.416
+            "ttft_ms": 780.438
           },
           "warm": {
             "prompt_tokens": 4017,
             "cached_tokens": 4016,
-            "ttft_ms": 27.669
+            "ttft_ms": 27.88
           }
         },
         {
           "cold": {
             "prompt_tokens": 4017,
             "cached_tokens": 0,
-            "ttft_ms": 779.01
+            "ttft_ms": 781.249
           },
           "warm": {
             "prompt_tokens": 4017,
             "cached_tokens": 4016,
-            "ttft_ms": 27.815
+            "ttft_ms": 28.253
           }
         },
         {
           "cold": {
             "prompt_tokens": 4017,
             "cached_tokens": 0,
-            "ttft_ms": 785.841
+            "ttft_ms": 789.456
           },
           "warm": {
             "prompt_tokens": 4017,
             "cached_tokens": 4016,
-            "ttft_ms": 30.013
+            "ttft_ms": 41.032
           }
         }
       ],
-      "cold_p50_ms": 782.744,
-      "warm_p50_ms": 27.828
+      "cold_p50_ms": 783.093,
+      "warm_p50_ms": 27.994
     },
     {
       "prefix_tokens": 8000,
@@ -145,65 +145,65 @@
           "cold": {
             "prompt_tokens": 8017,
             "cached_tokens": 0,
-            "ttft_ms": 1746.908
+            "ttft_ms": 1743.432
           },
           "warm": {
             "prompt_tokens": 8017,
             "cached_tokens": 8016,
-            "ttft_ms": 29.117
+            "ttft_ms": 29.076
           }
         },
         {
           "cold": {
             "prompt_tokens": 8017,
             "cached_tokens": 0,
-            "ttft_ms": 1739.759
+            "ttft_ms": 1732.499
           },
           "warm": {
             "prompt_tokens": 8017,
             "cached_tokens": 8016,
-            "ttft_ms": 29.177
+            "ttft_ms": 28.955
           }
         },
         {
           "cold": {
             "prompt_tokens": 8017,
             "cached_tokens": 0,
-            "ttft_ms": 1742.379
+            "ttft_ms": 1729.18
           },
           "warm": {
             "prompt_tokens": 8017,
             "cached_tokens": 8016,
-            "ttft_ms": 29.162
+            "ttft_ms": 29.103
           }
         },
         {
           "cold": {
             "prompt_tokens": 8017,
             "cached_tokens": 0,
-            "ttft_ms": 1744.555
+            "ttft_ms": 1737.557
           },
           "warm": {
             "prompt_tokens": 8017,
             "cached_tokens": 8016,
-            "ttft_ms": 29.187
+            "ttft_ms": 29.341
           }
         },
         {
           "cold": {
             "prompt_tokens": 8017,
             "cached_tokens": 0,
-            "ttft_ms": 1743.186
+            "ttft_ms": 1737.34
           },
           "warm": {
             "prompt_tokens": 8017,
             "cached_tokens": 8016,
-            "ttft_ms": 29.242
+            "ttft_ms": 29.279
           }
         }
       ],
-      "cold_p50_ms": 1743.186,
-      "warm_p50_ms": 29.177
+      "cold_p50_ms": 1737.34,
+      "warm_p50_ms": 29.103
     },
     {
       "prefix_tokens": 16000,
@@ -213,65 +213,65 @@
           "cold": {
             "prompt_tokens": 16017,
             "cached_tokens": 0,
-            "ttft_ms": 4153.236
+            "ttft_ms": 4124.928
           },
           "warm": {
             "prompt_tokens": 16017,
             "cached_tokens": 16016,
-            "ttft_ms": 47.035
+            "ttft_ms": 46.701
           }
         },
         {
           "cold": {
             "prompt_tokens": 16017,
             "cached_tokens": 0,
-            "ttft_ms": 4157.585
+            "ttft_ms": 4133.08
           },
           "warm": {
             "prompt_tokens": 16017,
             "cached_tokens": 16016,
-            "ttft_ms": 46.82
+            "ttft_ms": 47.268
           }
         },
         {
           "cold": {
             "prompt_tokens": 16017,
             "cached_tokens": 0,
-            "ttft_ms": 4159.759
+            "ttft_ms": 4147.875
           },
           "warm": {
             "prompt_tokens": 16017,
             "cached_tokens": 16016,
-            "ttft_ms": 47.969
+            "ttft_ms": 47.185
           }
         },
         {
           "cold": {
             "prompt_tokens": 16017,
             "cached_tokens": 0,
-            "ttft_ms": 4180.333
+            "ttft_ms": 4143.079
           },
           "warm": {
             "prompt_tokens": 16017,
             "cached_tokens": 16016,
-            "ttft_ms": 47.029
+            "ttft_ms": 46.898
           }
         },
         {
           "cold": {
             "prompt_tokens": 16017,
             "cached_tokens": 0,
-            "ttft_ms": 4205.56
+            "ttft_ms": 4151.036
           },
           "warm": {
             "prompt_tokens": 16017,
             "cached_tokens": 16016,
-            "ttft_ms": 47.581
+            "ttft_ms": 47.45
           }
         }
       ],
-      "cold_p50_ms": 4159.759,
-      "warm_p50_ms": 47.035
+      "cold_p50_ms": 4143.079,
+      "warm_p50_ms": 47.185
     },
     {
       "prefix_tokens": 26000,
@@ -281,70 +281,70 @@
           "cold": {
             "prompt_tokens": 26017,
             "cached_tokens": 0,
-            "ttft_ms": 8321.522
+            "ttft_ms": 8202.538
           },
           "warm": {
             "prompt_tokens": 26017,
             "cached_tokens": 26016,
-            "ttft_ms": 70.241
+            "ttft_ms": 68.942
           }
         },
         {
           "cold": {
             "prompt_tokens": 26017,
             "cached_tokens": 0,
-            "ttft_ms": 8408.036
+            "ttft_ms": 8256.666
           },
           "warm": {
             "prompt_tokens": 26017,
             "cached_tokens": 26016,
-            "ttft_ms": 69.011
+            "ttft_ms": 69.217
           }
         },
         {
           "cold": {
             "prompt_tokens": 26017,
             "cached_tokens": 0,
-            "ttft_ms": 8431.807
+            "ttft_ms": 8258.433
           },
           "warm": {
             "prompt_tokens": 26017,
             "cached_tokens": 26016,
-            "ttft_ms": 69.21
+            "ttft_ms": 70.019
           }
         },
         {
           "cold": {
             "prompt_tokens": 26017,
             "cached_tokens": 0,
-            "ttft_ms": 8436.62
+            "ttft_ms": 8276.878
           },
           "warm": {
             "prompt_tokens": 26017,
             "cached_tokens": 26016,
-            "ttft_ms": 69.045
+            "ttft_ms": 69.638
           }
         },
         {
           "cold": {
             "prompt_tokens": 26017,
             "cached_tokens": 0,
-            "ttft_ms": 8498.442
+            "ttft_ms": 8308.559
           },
           "warm": {
             "prompt_tokens": 26017,
             "cached_tokens": 26016,
-            "ttft_ms": 69.076
+            "ttft_ms": 69.328
           }
         }
       ],
-      "cold_p50_ms": 8431.807,
-      "warm_p50_ms": 69.076
+      "cold_p50_ms": 8258.433,
+      "warm_p50_ms": 69.328
     }
   ],
   "fit": {
-    "alpha": 0.16562719206782167,
-    "beta": 6.081506508765874e-06,
+    "alpha": 0.16990967120647443,
+    "beta": 5.669355681803608e-06,
     "units": "milliseconds, tokens"
   },
   "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",

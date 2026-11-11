@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.app.gateway.calibration import fit
+from backend.app.gateway.prompt_builder import Prefix
 from bench.ttft_bench import ROOT, Engine, benchmark
 from scripts.gpu_lease import gpu_lease
 
@@ -50,12 +51,20 @@ def render(data):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reduced", action="store_true", help="Measure three lengths using three cold/warm pairs each.")
+    parser.add_argument("--rewarm", action="store_true", help="Restore and verify the two published framework prefixes before releasing the GPU.")
     args = parser.parse_args()
     lengths = (2000, 8000, 26000) if args.reduced else (2000, 4000, 8000, 16000, 26000)
     trials = 3 if args.reduced else 5
     with gpu_lease(), Engine() as engine:
-        bands = [benchmark(engine, n, trials) for n in lengths]
-        meta = engine.get("/server_info").raise_for_status().json()
+        try:
+            bands = [benchmark(engine, n, trials) for n in lengths]
+            meta = engine.get("/server_info").raise_for_status().json()
+        finally:
+            if args.rewarm:
+                ratios = {name: Prefix(engine, name).warm(engine) for name in ("starlette", "fastapi")}
+                print("Restored public prefix hit ratios:", json.dumps(ratios), flush=True)
+                if min(ratios.values()) < 0.95:
+                    raise RuntimeError("The published contexts did not return to their warm state.")
     record = {
         "measured_at": datetime.now(timezone.utc).isoformat(), "bands": bands, "fit": fit(bands),
         "model": meta["served_model_name"], "sglang": meta["version"],

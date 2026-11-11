@@ -12,6 +12,10 @@ def value(name, default=""):
     return os.getenv(name) or dotenv_values(ROOT / ".env").get(name) or default
 
 
+def registered_inference():
+    return value("INFERENCE_ENDPOINT_MODE", "direct") == "registered"
+
+
 @lru_cache
 def manifest():
     return json.loads((ROOT / "contexts/manifest.json").read_text())
@@ -29,7 +33,7 @@ def calibration(mode="live"):
         from .gateway.hosted import read_profile
         return read_profile()
     profile = json.loads((ROOT / "bench/results/calibration.json").read_text())
-    if mode == "live" and value("INFERENCE_ENDPOINT_MODE", "direct") == "registered":
+    if mode == "live" and registered_inference():
         from .gateway.route_calibration import apply, current
         return apply(profile, current())
     return profile

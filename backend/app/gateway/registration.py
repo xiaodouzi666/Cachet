@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from backend.app.config import value
+from backend.app.config import registered_inference as enabled, value
 from backend.app.db import session_scope
 from backend.app.operations import Control
 from backend.app.gateway.tunnel_transport import TunnelTransport
@@ -21,10 +21,6 @@ PROBE_TTL = 45
 QUICK_HOST = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com")
 _probe_lock = threading.Lock()
 logger = logging.getLogger(__name__)
-
-
-def enabled():
-    return value("INFERENCE_ENDPOINT_MODE", "direct") == "registered"
 
 
 def origin_for(url, fixed=""):
