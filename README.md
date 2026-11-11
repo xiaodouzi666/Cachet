@@ -136,11 +136,11 @@ Open `/judge` in a configured deployment and choose **Start guided demo**. Each 
 - Email `sb-vfro4353809961@personal.example.com`
 - Password `1H>Qo^kR`
 
-On a local wallet test, ten unique measured turns survived a real browser stream disconnect. The browser resumed from event 4 and received event 5. Closing the $1 authorization released the full dollar and the platform waived $0.035196. In a separate six-step sandbox test, the judge captured $0.06 and released $0.94. The two recipients received $0.02 and $0.01 after the separate preparation. [Judge controls](frontend/components/judge.tsx)
+On the hosted app, an ordinary buyer approved a $1 sandbox wallet budget. The browser reconnected after event 107 and received event 108, with all ten measured turns present exactly once. Closing released the full dollar and the platform waived $0.034087. Two independent six-step judge runs each captured $0.06, released $4.94 of a $5 sandbox budget and reconciled eight PayPal objects with zero differences. The two recipients received $0.02 and $0.01 in each run. [Judge controls](frontend/components/judge.tsx)
 
 ## Run locally
 
-Install Docker with the Compose plugin and OpenSSL. The two containers can serve archived runs without a GPU or PayPal credentials. On a clean Linux checkout at `abd56bb`, a fresh BuildKit builder built both images and brought up seven working pages in 104.79 seconds. Replacing both containers preserved the workspace in the named SQLite volume. From a fresh checkout, generate two independent local secrets and start the services. The SQLite ledger persists in the `ledger` volume.
+Install Docker with the Compose plugin and OpenSSL. The two containers can serve archived runs without a GPU or PayPal credentials. On a clean Linux clone of release `5885857`, a fresh BuildKit builder built both images and brought up seven working pages in 181.69 seconds. Replacing both containers preserved the workspace in the named SQLite volume. From a fresh checkout, generate two independent local secrets and start the services. The SQLite ledger persists in the `ledger` volume.
 
 ```sh
 test -f .env || (
