@@ -95,15 +95,17 @@ The benchmark used Qwen2.5-7B-Instruct-AWQ, SGLang 0.5.23 and an NVIDIA GeForce 
 
 ![Measured cold and warm time to first text across five prefix lengths](bench/plots/prefix-latency.png)
 
-| Prefix tokens | Cold p50 | Warm p50 |
-|---:|---:|---:|
-| 2,000 | 384 ms | 28 ms |
-| 4,000 | 783 ms | 28 ms |
-| 8,000 | 1,743 ms | 29 ms |
-| 16,000 | 4,160 ms | 47 ms |
-| 26,000 | 8,432 ms | 69 ms |
+| Prefix tokens | Cold p50 | Warm p50 | Local warm SLA |
+|---:|---:|---:|---:|
+| 2,000 | 382.9 ms | 28.0 ms | 56.0 ms |
+| 4,000 | 783.1 ms | 28.0 ms | 56.0 ms |
+| 8,000 | 1,737.3 ms | 29.1 ms | 58.2 ms |
+| 16,000 | 4,143.1 ms | 47.2 ms | 94.4 ms |
+| 26,000 | 8,258.4 ms | 69.3 ms | 138.7 ms |
 
-A separate ten-turn FastAPI rate-limiting task produced its first text in 186 ms using the shared prefix and 8,277 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.045621 and $0.056174 respectively, before any SLA adjustments. Two of the ten shared calls met the 138.152 ms warm SLA. Those two calls accounted for 1,390 microdollars of Starlette royalties and 682 microdollars of FastAPI royalties at the default tariff. The two conversations produced their own outputs. These amounts describe metered usage. The shared FastAPI answer included prose around its working module.
+The fitted native prefill cost is `C(n) = αn + βn²`, with α = 0.169910 ms/token and β = 0.00000566936 ms/token². Live quotes and SLA checks on the deployed API use its separately measured route to the GPU. [GPU-host measurements and fit](bench/results/calibration.json)
+
+A separate ten-turn FastAPI rate-limiting task produced its first text in 186 ms using the shared prefix and 8,277 ms computing privately. Pricing each independent conversation's actual token counts at the default tariff gives $0.045621 and $0.056174 respectively, before any SLA adjustments. Two of those ten shared calls met the 138.152 ms warm SLA in effect for that recording. Those two calls accounted for 1,390 microdollars of Starlette royalties and 682 microdollars of FastAPI royalties at the default tariff. The two conversations produced their own outputs. These amounts describe metered usage. The shared FastAPI answer included prose around its working module.
 
 All four final generated modules passed the isolated HTTP checks. For both Starlette strategies, `/ping` returned JSON with `X-Route-Class: custom`, an unknown URL returned 404, and a second endpoint inherited the same header from the route subclass. Both FastAPI modules enforced independent client quotas and restored access after 60 seconds. [Paired benchmark and fit](bench/results/calibration.json) · [Session comparison](bench/results/sessions.json)
 
