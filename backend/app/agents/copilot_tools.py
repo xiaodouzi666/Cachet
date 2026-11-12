@@ -190,9 +190,10 @@ def mandate_breakdown(db, ws, mandate_id):
             .order_by(Capture.created_at)
         )
     )
+    statuses = ledger.capture_statuses(db, caps)
     for cap in caps:
         lines.append(
-            f"Capture {cap.paypal_capture_id or cap.id} is {cap.status}: {usd(cap.amount_cents * 10000)} with "
+            f"Capture {cap.paypal_capture_id or cap.id} is {statuses[cap.id]}: {usd(cap.amount_cents * 10000)} with "
             f"{usd(cap.fee_cents * 10000)} in recorded PayPal fees and {usd((cap.amount_cents - cap.fee_cents) * 10000)} net."
         )
         for r in db.scalars(select(Refund).where(Refund.capture_id == cap.id)):
@@ -238,14 +239,16 @@ def call_details(db, ws, call_id):
 
 def payment_activity(db, ws):
     lines = []
-    for cap in db.scalars(
+    caps = list(db.scalars(
         select(Capture)
         .where(Capture.workspace_id == ws)
         .order_by(Capture.created_at.desc())
         .limit(8)
-    ):
+    ))
+    statuses = ledger.capture_statuses(db, caps)
+    for cap in caps:
         lines.append(
-            f"Capture {cap.paypal_capture_id or cap.id} (mandate {cap.mandate_id}) is {cap.status} for {usd(cap.amount_cents * 10000)}."
+            f"Capture {cap.paypal_capture_id or cap.id} (mandate {cap.mandate_id}) is {statuses[cap.id]} for {usd(cap.amount_cents * 10000)}."
         )
     for r in db.scalars(
         select(Refund)

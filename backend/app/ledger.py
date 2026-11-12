@@ -38,6 +38,39 @@ class LedgerError(ValueError):
     pass
 
 
+def capture_statuses(session, captures):
+    """Project confirmed refunds without depending on capture-webhook arrival order.
+
+    Persisted provider states remain unchanged. This also covers older capture rows
+    whose refunds were posted before the capture webhook could refresh their status.
+    """
+    rows = {capture.id: capture for capture in captures}
+    statuses = {identifier: capture.status for identifier, capture in rows.items()}
+    eligible = [
+        identifier for identifier, capture in rows.items()
+        if capture.status in CAPTURED and capture.status != "REFUNDED"
+    ]
+    if not eligible:
+        return statuses
+    refunds = session.execute(
+        select(Refund.capture_id, Refund.workspace_id, func.sum(Refund.amount_cents))
+        .where(
+            Refund.capture_id.in_(eligible),
+            Refund.status == "COMPLETED",
+            Refund.paypal_refund_id.is_not(None),
+            Refund.paypal_refund_id != "",
+        )
+        .group_by(Refund.capture_id, Refund.workspace_id)
+    )
+    for identifier, workspace_id, refunded in refunds:
+        capture = rows[identifier]
+        if capture.workspace_id == workspace_id and refunded > 0:
+            statuses[identifier] = (
+                "REFUNDED" if refunded >= capture.amount_cents else "PARTIALLY_REFUNDED"
+            )
+    return statuses
+
+
 def receivable(consumer_id):
     return f"consumer:{consumer_id}:receivable"
 

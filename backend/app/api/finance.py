@@ -11,7 +11,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, func, or_, select
-from backend.app import marketplace
+from backend.app import ledger, marketplace
 from backend.app.api.access import (
     gateway,
     client_ip,
@@ -393,14 +393,17 @@ def entries(ws=wsdep):
 
 @router.get("/captures")
 def captures(ws=wsdep):
-    rows = listing(
-        Capture,
-        "id mandate_id paypal_capture_id amount_cents final fee_cents status call_ids_json created_at",
-        ws,
-    )
-
-
-    return [{**r, "net_cents": r["amount_cents"] - r["fee_cents"]} for r in rows]
+    with session_scope(write=False) as db:
+        rows = list(db.scalars(
+            select(Capture).where(Capture.workspace_id == ws).order_by(Capture.created_at.desc())
+        ))
+        statuses = ledger.capture_statuses(db, rows)
+        names = "id mandate_id paypal_capture_id amount_cents final fee_cents status call_ids_json created_at"
+        return [
+            {**fields(row, names), "status": statuses[row.id],
+             "net_cents": row.amount_cents - row.fee_cents}
+            for row in rows
+        ]
 
 
 @router.get("/refunds")
