@@ -47,3 +47,30 @@ The worker runs in tmux session cachet-app-checker; its private logs and retry s
 A receipt is tied to the workspace, run, final call, task, turn and exact original-answer SHA-256. The API recomputes those bindings, validates the HTTP evidence and response format, and accepts results only for the worker's current lease. Repeated delivery is idempotent. Infrastructure failures are retried up to three times; stale or unavailable checks remain unverified. The browser polls its owned run's read-only application-check endpoint after generation and shows Checking, Passed or Failed, with inspectable evidence. Neither the browser gateway nor ordinary workspace clients can submit verification results.
 
 Fault follow-ups, operator soak/sponsor jobs, incomplete runs and unsupported tasks are excluded. Replay keeps its separately validated recorded receipts. Existing eligible live runs can be queued by an operator with POST /api/admin/application-checks/enqueue/{run_id}; GET /api/admin/application-checks/{run_id} reads their status. These administrative routes require the existing backend operator token and are not forwarded by the browser gateway. Rechecking does not rewrite the original run-completion event or alter its metering.
+
+## Runtime recovery and boot restoration
+
+On the Linux GPU host, install the user-level runtime guard after the model, Python environments, Docker verifier image and private environment have been provisioned:
+
+~~~sh
+.venv/bin/python scripts/runtime_guard.py install
+.venv/bin/python scripts/runtime_guard.py status
+~~~
+
+The installer requires the user's existing systemd lingering setting to be enabled; it does not invoke sudo. It verifies the generated unit with systemd-analyze before installing and enabling cachet-runtime-guard.service. With lingering enabled, the user manager starts at boot without an interactive login. Installation reports enabled/active configuration separately from an actual reboot test.
+
+The guard retains healthy cachet-sglang, cachet-gpu-agent and cachet-app-checker tmux sessions and checks them every 20 seconds. Missing sessions and sessions with exactly one dead pane are restored through their existing start helpers. The checker is started only after Docker and the existing verifier image are available, so boot ordering does not consume queued verification attempts. A failing helper does not prevent the other services from being checked.
+
+SGLang gets a 300-second startup grace period. After that grace, a continuous 180-second failure of its authenticated five-second loopback health probe permits recovery; successful probes reset the failure interval. HTTP 401/403 indicates a configuration problem and never triggers a GPU restart. Recovery verifies the exact project pane and all process-group members, retains the dead pane while its scheduler exits, and refuses to start another engine if ownership, remaining processes or the listening port are uncertain. The previously deployed .cache/v3-integrate engine is recognized only when its launcher content and Python interpreter match this checkout. The shared SGLang start helper applies the same residue check to manual starts and the existing GPU agent's fallback.
+
+The gpu-agent pause marker is preserved and suppresses its automatic recovery; it pauses tunnel discovery, not SGLang or the checker. Systemd restarts the guard itself after five seconds. KillMode=process is intentional here: systemd supervises the guard, while the three existing services remain in independent tmux sessions. Stopping or restarting the guard therefore retains those sessions. Before SGLang maintenance, pause the GPU agent as well: otherwise its existing fallback can restart SGLang even with the guard stopped. Pausing the agent temporarily stops its tunnel.
+
+~~~sh
+.venv/bin/python scripts/gpu_agent.py pause
+systemctl --user stop cachet-runtime-guard.service
+# Perform the intended SGLang tmux maintenance, then restore discovery and supervision:
+.venv/bin/python scripts/gpu_agent.py resume
+systemctl --user start cachet-runtime-guard.service
+~~~
+
+For checker-only maintenance, stopping the guard is sufficient before intentionally stopping the checker session; leave the GPU agent and tunnel running. Use systemctl --user disable --now cachet-runtime-guard.service to disable supervision and boot restoration. Private logs, the single-instance lock and a timestamped observation live in logs/runtime-guard/; credentials stay in .env and never appear in the unit. Recovery does not rerun interrupted paid tasks or create PayPal operations. A physical power outage, unavailable NVIDIA driver, corrupt model files or an ambiguous orphaned engine can still require operator intervention; the guard reports these conditions instead of starting duplicate GPU processes.

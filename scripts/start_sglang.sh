@@ -16,6 +16,20 @@ if [[ ${1:-} == --install ]]; then
   exit 0
 fi
 
+if [[ ${1:-} != --serve ]]; then
+  if [[ $# -ne 0 ]]; then
+    echo "Usage: scripts/start_sglang.sh [--install]" >&2
+    exit 2
+  fi
+  if tmux has-session -t '=cachet-sglang' 2>/dev/null; then
+    echo "tmux session cachet-sglang already exists. See logs/sglang.log."
+    exit 0
+  fi
+  # Shared by manual starts, gpu_agent fallback and the boot guard. Refuse a
+  # second engine when a lost tmux session left a project GPU process behind.
+  .venv/bin/python scripts/runtime_guard.py check-start
+fi
+
 if [[ ! -x .venv-sglang/bin/python ]]; then
   echo "Install the inference environment and model with scripts/start_sglang.sh --install." >&2
   exit 1
