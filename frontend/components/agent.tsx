@@ -23,6 +23,7 @@ import { ArchivedPrefix } from "./archive";
 import { GeneratedApplication } from "./application-check";
 import { Wallet } from "./wallet";
 
+type RunEvidence = { runId: string; value: ApplicationEvidence };
 type StreamItem = { event: string; text: string; label?: string };
 export function RunFeed({
   run,
@@ -35,10 +36,18 @@ export function RunFeed({
   const [turns, setTurns] = useState<Turn[]>([]),
     [activity, setActivity] = useState<StreamItem[]>([]),
     [error, setError] = useState(""),
-    [terminal, setTerminal] = useState<string | null>(null),
-    [evidence, setEvidence] = useState<ApplicationEvidence | null>(null),
+    [terminal, setTerminal] = useState<{ runId: string; status: string } | null>(null),
+    [evidence, setEvidence] = useState<RunEvidence | null>(null),
+    [checkedEvidence, setCheckedEvidence] = useState<RunEvidence | null>(null),
+    [checkError, setCheckError] = useState<{ runId: string; message: string } | null>(null),
+    [checkAttempt, setCheckAttempt] = useState(0),
     [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    setCheckedEvidence(null);
+    setCheckError(null);
+  }, [run.id]);
+  useEffect(() => {
+    let disposed = false;
     setViewTurn(null);
     setTurns([]);
     setActivity([]);
@@ -60,7 +69,7 @@ export function RunFeed({
       "done",
     ]) {
       source.addEventListener(name, (raw: Event) => {
-        if (!("data" in raw)) return;
+        if (disposed || !("data" in raw)) return;
         const msg = raw as MessageEvent<string>;
         if (msg.lastEventId && seen.has(msg.lastEventId)) return;
         if (msg.lastEventId) seen.add(msg.lastEventId);
@@ -77,12 +86,12 @@ export function RunFeed({
             setError(d.code === "insufficient_budget"
               ? `${d.message} Available ${usd(d.available_micros)}. The next turn needs up to ${usd(d.required_micros)}.`
               : d.message || d.detail || "The agent run failed.");
-            setTerminal("failed");
+            setTerminal({ runId: run.id, status: "failed" });
             source.close();
             void onComplete().catch((e) => setError(describe(e)));
           } else if (name === "done") {
-            setTerminal(d.status || "completed");
-            if (d.application_check) setEvidence(d);
+            setTerminal({ runId: run.id, status: d.status || "completed" });
+            if (d.application_check) setEvidence({ runId: run.id, value: d });
             source.close();
             void onComplete().catch((e) => setError(describe(e)));
             setActivity((p) => [
@@ -126,16 +135,66 @@ export function RunFeed({
         setError("Event connection interrupted. Reconnecting to the run…");
     };
     source.onopen = () => setError("");
-    return () => source.close();
+    return () => {
+      disposed = true;
+      source.close();
+    };
   }, [run.id, attempt, onComplete]);
   const started =
     turns.length > 0 ||
     activity.some(
       (item) => item.event === "decision" || item.event === "quote",
     );
+  const terminalStatus = terminal?.runId === run.id ? terminal.status : null;
   const state =
-    terminal || (started && run.status === "queued" ? "running" : run.status);
+    terminalStatus || (started && run.status === "queued" ? "running" : run.status);
   const finished = state === "completed" || state === "failed";
+  // HTTP verification outlives generation. A scoped receipt is authoritative over
+  // the immutable SSE done event, including when that old event says Unverified.
+  useEffect(() => {
+    if (!finished) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    async function poll() {
+      try {
+        const result = await api<ApplicationEvidence>(
+          `agent/runs/${encodeURIComponent(run.id)}/application-check`,
+          undefined,
+          controller.signal,
+        );
+        if (disposed) return;
+        if (result.run_id !== run.id || !result.application_check)
+          throw new Error("The server returned an unrelated verification state.");
+        setCheckedEvidence({ runId: run.id, value: result });
+        setCheckError(null);
+        if (["queued", "running", "checking"].includes(result.application_check.status))
+          timer = setTimeout(() => void poll(), 2500);
+      } catch (err) {
+        if (disposed) return;
+        setCheckError({
+          runId: run.id,
+          message: `Application verification is temporarily unavailable. Retrying… ${describe(err)}`,
+        });
+        timer = setTimeout(() => void poll(), 5000);
+      }
+    }
+    void poll();
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [run.id, finished, checkAttempt]);
+  const streamedEvidence = evidence?.runId === run.id ? evidence.value : null;
+  const savedReceipt = run.application_check &&
+    run.application_check.status !== "unverified" &&
+    streamedEvidence?.application_check?.status === "unverified" ? run : null;
+  const currentEvidence =
+    (checkedEvidence?.runId === run.id ? checkedEvidence.value : null) ||
+    savedReceipt ||
+    streamedEvidence ||
+    run;
   const finalTurn = turns.length
     ? Math.max(...turns.map((t) => t.turn))
     : undefined;
@@ -156,10 +215,14 @@ export function RunFeed({
         </Tag>
       </div>
       <Failure error={error} retry={() => setAttempt((n) => n + 1)} />
-      {(finished || evidence?.application_check || run.application_check) && (
+      <Failure
+        error={checkError?.runId === run.id ? checkError.message : ""}
+        retry={() => setCheckAttempt((n) => n + 1)}
+      />
+      {(finished || currentEvidence.application_check) && (
         <GeneratedApplication
-          evidence={evidence || run}
-          finalTurn={terminal === "completed" ? finalTurn : undefined}
+          evidence={currentEvidence}
+          finalTurn={terminalStatus === "completed" ? finalTurn : undefined}
           answerLink={(n) => "#" + responseId(n)}
         />
       )}

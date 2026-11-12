@@ -11,7 +11,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, func, or_, select
-from backend.app import ledger, marketplace
+from backend.app import application_checks, ledger, marketplace
 from backend.app.api.access import (
     gateway,
     client_ip,
@@ -127,6 +127,9 @@ def fields(obj, names):
 
 
 def saved_application_check(db, run):
+    independent = application_checks.saved_evidence(db, run)
+    if independent is not None:
+        return independent
     done = (
         db.scalar(
             select(RunEvent.payload)

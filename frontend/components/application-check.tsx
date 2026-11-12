@@ -7,6 +7,8 @@ function CheckReceipt({ check }: { check?: ApplicationCheck | null }) {
     !http &&
     !answer_sha256 &&
     !source_sha256 &&
+    !check?.checked_at &&
+    !check?.checker_version &&
     typeof check?.requested_format_met !== "boolean"
   )
     return null;
@@ -19,6 +21,10 @@ function CheckReceipt({ check }: { check?: ApplicationCheck | null }) {
           {check.requested_format_met ? "Matched" : "Did not match"}
         </p>
       )}
+      {check?.checked_at && (
+        <p>Checked at <time dateTime={check.checked_at}>{check.checked_at}</time></p>
+      )}
+      {check?.checker_version && <p>Checker · {check.checker_version}</p>}
       {answer_sha256 && (
         <p>
           Answer SHA-256 <code>{answer_sha256}</code>
@@ -54,15 +60,18 @@ export function GeneratedApplication({
 }) {
   const final = evidence.application_check;
   const selected = evidence.verified_application_turn;
+  const status = final?.status === "passed" && final.requested_format_met === false
+    ? "failed"
+    : final?.status || "unverified";
   const prior =
-    final?.status !== "passed" &&
+    status !== "passed" &&
     evidence.earlier_application_check?.status === "passed" &&
+    evidence.earlier_application_check.requested_format_met !== false &&
     typeof selected === "number" &&
     selected > 0 &&
     (finalTurn === undefined || selected < finalTurn)
       ? evidence.earlier_application_check
       : null;
-  const status = final?.status || "unverified";
   return (
     <section
       className="application-check"
@@ -87,11 +96,19 @@ export function GeneratedApplication({
               ? "Passed"
               : status === "failed"
                 ? "Failed"
-                : "Unverified"}
+                : status === "queued"
+                  ? "Queued"
+                  : status === "running" || status === "checking"
+                    ? "Checking"
+                    : "Unverified"}
           </Tag>
         </div>
         {final?.reason ? (
           <p>{final.reason}</p>
+        ) : status === "queued" ? (
+          <p>The final response is queued for an HTTP check.</p>
+        ) : status === "running" || status === "checking" ? (
+          <p>Checking the generated application's HTTP responses.</p>
         ) : status === "unverified" ? (
           <p>
             This run has no recorded execution result for the final response.
@@ -102,8 +119,10 @@ export function GeneratedApplication({
             Read final response
           </a>
         )}
-        {final?.requested_format_met === false && (
-          <p>The response did not match the requested format.</p>
+        {final?.requested_format_met === false && !(final.status === "failed" && final.reason) && (
+          <p>{final.status === "passed"
+            ? "HTTP checks passed, but the response did not match the requested format."
+            : "The response did not match the requested format."}</p>
         )}
         {finalResponse && (
           <details>

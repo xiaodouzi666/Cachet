@@ -36,6 +36,8 @@ test("renders actual archived application outcomes separately from metering", as
       expect(run.decision).toBe(decision);
       expect(run.application_check).toBeTruthy();
       const check = run.application_check!;
+      const displayStatus = check.status === "passed" && check.requested_format_met === false
+        ? "failed" : check.status;
       outcomes[task.id + "/" + decision] = check.status;
       await expect(primary).toHaveAttribute("data-task", task.id);
       await expect(primary).toHaveAttribute("data-decision", decision);
@@ -80,7 +82,7 @@ test("renders actual archived application outcomes separately from metering", as
       await expect(final).toContainText(
         "Final response · Turn " + run.final_turn,
       );
-      await expect(final.locator(".tag")).toHaveText(check.status, {
+      await expect(final.locator(".tag")).toHaveText(displayStatus, {
         ignoreCase: true,
       });
       if (check.reason) await expect(final).toContainText(check.reason);
@@ -117,7 +119,9 @@ test("renders actual archived application outcomes separately from metering", as
       const earlier = receipt.locator(".application-result").nth(1);
       if (
         run.earlier_application_check?.status === "passed" &&
-        check.status !== "passed"
+        run.earlier_application_check.requested_format_met !== false &&
+        displayStatus !== "passed" &&
+        Number(run.verified_application_turn) < run.final_turn
       ) {
         await expect(earlier).toContainText(
           "Earlier module · Turn " + run.verified_application_turn,

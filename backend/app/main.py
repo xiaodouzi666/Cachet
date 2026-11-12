@@ -7,7 +7,7 @@ import httpx
 
 from backend.app.config import ROOT, calibration, value
 from backend.app.db import init_db
-from backend.app.api import agent,catalog,copilot,finance,guide,webhooks,inference_endpoint
+from backend.app.api import agent,catalog,copilot,finance,guide,webhooks,inference_endpoint,application_checks
 from backend.app.gateway.registration import monitor as monitor_endpoint
 from backend.app.gateway.modes import health as engine_health
 from backend.app.paypal.client import PayPalConfigError,PayPalError
@@ -24,7 +24,7 @@ async def lifespan(app):
 
 
 app=FastAPI(title="Cachet",version="0.2.0",lifespan=lifespan)
-for module in (catalog,agent,copilot,finance,guide,webhooks,inference_endpoint):app.include_router(module.router)
+for module in (catalog,agent,copilot,finance,guide,webhooks,inference_endpoint,application_checks):app.include_router(module.router)
 
 @app.exception_handler(PayPalConfigError)
 async def config_error(request:Request,exc):

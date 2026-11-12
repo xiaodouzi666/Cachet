@@ -1,6 +1,7 @@
 """Run the coding agent and persist each metered turn before publishing its SSE event."""
 
 import json
+import logging
 import threading
 import time
 from decimal import Decimal, ROUND_CEILING
@@ -8,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
-from backend.app import ledger, marketplace, soak
+from backend.app import application_checks, ledger, marketplace, soak
 from backend.app.agents.anomaly import payer_key, same_payer_layers
 from backend.app.agents.inference import FAULT_FOLLOWUPS, live_turns
 from backend.app.agents.quote_reason import generate_reason, recorded_reason
@@ -59,6 +60,30 @@ class Start(BaseModel):
 
 def emit(db, run_id, kind, payload):
     db.add(RunEvent(run_id=run_id, event_type=kind, payload=payload))
+
+
+def completed_run_payload(db, run, checked_track=None):
+    """Verification failure must not turn a completed, settled run into an error."""
+    evidence = application_evidence(checked_track)
+    try:
+        with db.begin_nested():
+            job = application_checks.enqueue(db, run)
+            if job is not None:
+                db.flush()
+                evidence = application_checks.evidence(db, run)
+    except Exception as exc:
+        # Roll back only the verification savepoint, keeping run and ledger writes.
+        logging.getLogger(__name__).warning(
+            "Application check enqueue failed for run %s (%s)", run.id, type(exc).__name__
+        )
+        evidence = {
+            "application_check": {
+                "status": "unverified",
+                "reason": "Independent HTTP verification is unavailable; the coding run completed.",
+            },
+            "verified_application_turn": None,
+        }
+    return {"run_id": run.id, "status": run.status, **evidence}
 
 
 def public_explanation(receipt):
@@ -394,14 +419,7 @@ def execute(ws, identifier, context_id, tenant):
                 r.status = "completed"
                 r.ended_at = utcnow()
                 emit(
-                    db,
-                    identifier,
-                    "done",
-                    {
-                        "run_id": identifier,
-                        "status": r.status,
-                        **application_evidence(checked_track),
-                    },
+                    db, identifier, "done", completed_run_payload(db, r, checked_track)
                 )
     except Exception as exc:
         from backend.app.paypal.client import PayPalError

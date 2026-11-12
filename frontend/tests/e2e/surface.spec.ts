@@ -103,6 +103,11 @@ test("uses the real API through isolated browser workspaces and the settlement d
 test("protects the gateway and fits mobile navigation", async ({ page }) => {
   const unknown = await page.request.post("/api/admin", { data: {} });
   expect(unknown.status()).toBe(404);
+  for (const path of ["claim", "result", "enqueue"]) {
+    const privateRoute = "/api/admin/application-checks/" + path;
+    expect((await page.request.post(privateRoute, { data: {} })).status()).toBe(404);
+    expect((await page.request.get(privateRoute)).status()).toBe(404);
+  }
   const forged = await page.request.post("/api/judge/workspace", {
     data: { kind: "judge" },
     headers: { origin: "https://untrusted.invalid" },

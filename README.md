@@ -197,6 +197,8 @@ With Docker running, verify the actual final modules over loopback HTTP inside n
 .venv/bin/python -m scripts.check_generated_apps --build --require-passed
 ```
 
+Completed live built-in tasks are checked asynchronously by the operator's isolated Docker worker. The page shows **Checking** until the exact final answer passes both the HTTP contract and the requested response format, then displays the timestamp and answer/module hashes under **Inspect verification evidence**. A checker outage never becomes a pass. This worker is separate from GPU inference and payment settlement; see [live application verification](docs/deployment.md#live-application-verification).
+
 ## Limitations and fallbacks
 
 A fresh Compose deployment can display archived results without credentials. Funding, capture, refund and payout require actual PayPal Sandbox accounts. The coding agent offers two built-in framework tasks. Free-text tasks are disabled because the current model did not reliably meet custom response-format requirements. Existing custom run records remain available for audit. Replay accepts the recorded tasks and quote inputs (25% cold for buy, 0% for compute), and explicitly identifies their original model output. A verified independent hosted engine and its calibration must be provisioned before that mode can serve calls. [Supported modes](docs/deployment.md)
