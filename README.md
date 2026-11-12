@@ -1,5 +1,7 @@
 # Cachet
 
+[Watch the 2:36 demo on YouTube](https://youtu.be/UoxiKC3EuFg) · [Try Judge Mode](https://cachet-web-cx6f2.onrender.com/judge)
+
 Cachet lets coding agents buy warm open-source context. The engine counts reused tokens, the ledger attributes royalties to publishers, and PayPal Sandbox handles the money.
 
 [Open the hosted six-step Judge Mode](https://cachet-web-cx6f2.onrender.com/judge) to try a sandbox budget. The [public API health response](https://cachet-api-cx6f2.onrender.com/api/health) reports the current inference mode.
